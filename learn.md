@@ -28,3 +28,11 @@ nest g module database
 nest g service database
 
 nest g resource employees	// 创建REST api
+
+npm i @nestjs/throttler	// rest api 相关节流阀
+
+## 我的记录器
+
+nest g module my-logger
+
+nest g service my-logger
