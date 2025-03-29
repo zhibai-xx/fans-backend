@@ -10,24 +10,24 @@ import { MyLoggerModule } from './my-logger/my-logger.module';
 
 @Module({
   imports: [
-    UsersModule,
-    DatabaseModule,
-    EmployeesModule,
-    ThrottlerModule.forRoot([{
-      name: 'short',
-      ttl: 1000,
-      limit: 3
+    UsersModule,  // 用户模块，处理用户相关功能
+    DatabaseModule,  // 数据库模块，提供数据库连接服务
+    EmployeesModule,  // 员工模块，处理员工相关功能
+    ThrottlerModule.forRoot([{  // 限流模块配置，防止API过度使用
+      name: 'short',  // 短期限流策略
+      ttl: 1000,  // 1秒内
+      limit: 3  // 最多允许3个请求
     }, {
-      name: 'long',
-      ttl: 60000,
-      limit: 100
+      name: 'long',  // 长期限流策略
+      ttl: 60000,  // 1分钟内
+      limit: 100  // 最多允许100个请求
     }]),
-    MyLoggerModule
+    MyLoggerModule  // 自定义日志模块
   ],
-  controllers: [AppController],
-  providers: [AppService, {
-    provide: APP_GUARD,
-    useClass: ThrottlerGuard
+  controllers: [AppController],  // 应用主控制器
+  providers: [AppService, {  // 应用服务提供者和全局守卫
+    provide: APP_GUARD,  // 注册全局守卫
+    useClass: ThrottlerGuard  // 使用限流守卫
   }],
 })
 export class AppModule { }

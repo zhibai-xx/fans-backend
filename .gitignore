@@ -12,6 +12,10 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 
+# md
+learn.md
+backend.md
+
 # OS
 .DS_Store
 
