@@ -15,17 +15,150 @@ datasource db {
   // directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
-model Employee {
-  id Int @id @default(autoincrement())
-  name String
-  email String @unique
-  role Role
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+
+// =====================================
+// User 用户表
+// =====================================
+model User {
+  id           Int    @id @default(autoincrement())  // 用户ID,自增id性能优于uuid
+  username     String    @unique                    // 用户名（唯一）
+  email        String    @unique              // 邮箱（唯一）
+  password     String                         // 加密后的密码
+  phoneNumber  String?   // 手机号（可选）
+  avatar_url   String?   @default("default_avatar.png") // 头像URL
+  role         UserRole  @default(USER)       // 角色：USER/ADMIN
+  status       UserStatus @default(ACTIVE)    // 状态：ACTIVE/SUSPENDED
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+
+  // 关联关系
+  uploaded_media Media[]   // 上传的内容
+  comments      Comment[] 
+  favorites     Favorite[]
+
+  // @@index([username, email]) // 复合索引加速登录查询
+  @@index([username])
+  @@index([email])
 }
 
-enum Role {
-  INTERN
-  ENGINEER
+enum UserRole {
+  USER
   ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+// =====================================
+// Media 媒体内容
+// =====================================
+model Media {
+  id          String   @id @default(uuid())
+  title       String   @db.VarChar(200)       // 标题
+  description String?  @db.VarChar(500)       // 描述
+  url         String                          // 资源URL（OSS存储路径）
+  thumbnail_url String?                       // 缩略图URL
+  media_type  MediaType                      // 类型：IMAGE/VIDEO
+  duration    Int?                           // 视频时长（秒）
+  width       Int?                           // 宽度（像素）
+  height      Int?                           // 高度（像素）
+  status      MediaStatus @default(PENDING)  // 审核状态
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  // 关联关系
+  // relation定义模型之间的关联关系，fields: [外键], references: [主键]
+  user_id     Int   @map("user_id") // 将 Prisma 模型中的字段名映射到数据库表中的实际列名
+  user        User     @relation(fields: [user_id], references: [id]) // 表示通过 user_id 关联到 User 表的 id
+  category_id String?
+  category    Category? @relation(fields: [category_id], references: [id])
+  tags        MediaTag[]
+  comments    Comment[]
+  favorites   Favorite[]
+
+  @@index([user_id, status]) // 加速用户内容管理查询
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+}
+
+enum MediaStatus {
+  PENDING   // 待审核
+  APPROVED  // 已发布
+  REJECTED  // 已拒绝
+  PRIVATE   // 用户暂存，不发布
+}
+
+// =====================================
+// Category、Tag 分类、标签
+// =====================================
+model Category {
+  id          String   @id @default(uuid())
+  name        String   @unique @db.VarChar(50) // 分类名称（如"舞台照"、"综艺片段"）
+  description String?  @db.VarChar(200)
+  created_at  DateTime @default(now())
+
+  // 关联关系
+  media      Media[]
+}
+
+model Tag {
+  id         String    @id @default(uuid())
+  name       String    @unique @db.VarChar(30) // 标签名（如"演唱会"、"生日纪念"）
+  created_at DateTime  @default(now())
+
+  // 关联关系
+  media_tags MediaTag[]
+}
+
+model MediaTag {
+  media_id String @map("media_id")
+  tag_id   String @map("tag_id")
+  media    Media  @relation(fields: [media_id], references: [id])
+  tag      Tag    @relation(fields: [tag_id], references: [id])
+
+  @@id([media_id, tag_id]) // 复合主键
+}
+
+// =====================================
+// Comment 评论表
+// =====================================
+model Comment {
+  id              String   @id @default(uuid())
+  content         String   @db.VarChar(1000) // 评论内容
+  parent_id       String?  // 父评论ID（支持嵌套回复），可为空，表示顶级评论
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  // 关联关系
+  user_id   Int @map("user_id")
+  user      User   @relation(fields: [user_id], references: [id])
+  media_id  String @map("media_id")
+  media     Media  @relation(fields: [media_id], references: [id])
+
+  // 自关联实现评论树
+  replies   Comment[] @relation("CommentReplies") // 包含所有直接回复该评论的子评论
+  parent    Comment?  @relation("CommentReplies", fields: [parent_id], references: [id])
+
+  @@index([media_id, created_at]) // 按时间排序评论
+}
+
+// =====================================
+// Favorite 收藏表
+// =====================================
+model Favorite {
+  id         String   @id @default(uuid())
+  created_at DateTime @default(now())
+
+  // 关联关系
+  user_id    Int @map("user_id")
+  user       User   @relation(fields: [user_id], references: [id])
+  media_id   String @map("media_id")
+  media      Media  @relation(fields: [media_id], references: [id])
+
+  @@unique([user_id, media_id]) // 禁止重复收藏
 }

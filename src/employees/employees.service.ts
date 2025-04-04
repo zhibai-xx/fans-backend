@@ -6,7 +6,7 @@ import { DatabaseService } from 'src/database/database.service';
 export class EmployeesService {
   // 通过构造函数注入数据库服务
   constructor(private readonly databaseService: DatabaseService) { }
-  
+  /** 
   // 创建新员工记录
   async create(createEmployeeDto: Prisma.EmployeeCreateInput) {
     // 使用Prisma客户端创建员工记录
@@ -57,4 +57,5 @@ export class EmployeesService {
       }
     })
   }
+  */
 }

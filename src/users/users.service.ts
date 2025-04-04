@@ -2,9 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { NotFoundException } from '@nestjs/common';
+import { Prisma, UserRole } from '@prisma/client';
+import { DatabaseService } from 'src/database/database.service';
 
 @Injectable()
 export class UsersService {
+    // 通过构造函数注入数据库服务
+    constructor(private readonly databaseService: DatabaseService) { }
+
     // 模拟用户数据，实际应用中通常会从数据库获取
     private users = [
         {
@@ -35,14 +40,13 @@ export class UsersService {
      * @param role 可选的角色筛选参数
      * @returns 筛选后的用户数组
      */
-    findAll(role?: 'ADMIN' | 'INTERN' | 'ENGINEER') {
-        if (role) {
-            const rolesArray = this.users.filter(user => user.role === role)
-            // 如果没有找到匹配的角色，抛出NotFoundException异常
-            if (rolesArray.length === 0) throw new NotFoundException('User Role Not Found')
-            return rolesArray
-        }
-        return this.users
+    async findAll(role?: UserRole) {
+        if (role) return this.databaseService.user.findMany({
+            where: {
+                role,
+            }
+        })
+        return this.databaseService.user.findMany()
     }
 
     /**
@@ -50,8 +54,12 @@ export class UsersService {
      * @param id 用户ID
      * @returns 找到的用户对象
      */
-    findOne(id: number) {
-        const user = this.users.find(user => user.id === id)
+    async findOne(id: number) {
+        const user = this.databaseService.user.findUnique({
+            where: {
+                id,
+            },
+        })
         // 如果没有找到用户，抛出NotFoundException异常
         if (!user) throw new NotFoundException('User Not Found')
         return user
@@ -62,16 +70,10 @@ export class UsersService {
      * @param createUserDto 创建用户的数据传输对象
      * @returns 创建后的用户对象
      */
-    create(createUserDto: CreateUserDto) {
-        // 按ID降序排序，找出最大ID
-        const usersByHighestId = [...this.users].sort((a, b) => b.id - a.id)
-        // 创建新用户，ID为最大ID+1
-        const newUser = {
-            id: usersByHighestId[0].id + 1,
-            ...createUserDto
-        }
-        this.users.push(newUser)
-        return newUser
+    async create(createUserDto: CreateUserDto) {
+        return this.databaseService.user.create({
+            data: createUserDto
+        })
     }
 
     /**
@@ -80,15 +82,13 @@ export class UsersService {
      * @param updateUserDto 更新用户的数据传输对象
      * @returns 更新后的用户对象
      */
-    update(id: number, updateUserDto: UpdateUserDto) {
-        // 遍历用户数组，更新指定ID的用户
-        this.users = this.users.map(user => {
-            if (user.id === id) {
-                return { ...user, ...updateUserDto }
-            }
-            return user
+    async update(id: number, updateUserDto: UpdateUserDto) {
+        return this.databaseService.user.update({
+            where: {
+                id,
+            },
+            data: updateUserDto
         })
-        return this.findOne(id)
     }
 
     /**
@@ -96,10 +96,11 @@ export class UsersService {
      * @param id 用户ID
      * @returns 被删除的用户对象
      */
-    delete(id: number) {
-        const removeUser = this.findOne(id)
-        // 从用户数组中移除指定ID的用户
-        this.users = this.users.filter(user => user.id !== id)
-        return removeUser
+    async delete(id: number) {
+        return this.databaseService.user.delete({
+            where: {
+                id
+            }
+        })
     }
 }
