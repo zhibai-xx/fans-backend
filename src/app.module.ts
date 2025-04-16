@@ -7,9 +7,21 @@ import { EmployeesModule } from './employees/employees.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { MyLoggerModule } from './my-logger/my-logger.module';
+import { MediaModule } from './media/media.module';
+import { ConfigModule } from '@nestjs/config';
+import uploadConfig from './config/upload.config';
+import ossConfig from './config/oss.config';
+import { validate } from './config/env.validation'; // 如果添加了验证
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,       // 全局可用
+      load: [uploadConfig, ossConfig], // 加载自定义配置
+      validate, // 启用环境变量验证（可选）
+      envFilePath: ['.env'],  // 指定环境文件路径
+    }),
     UsersModule,  // 用户模块，处理用户相关功能
     DatabaseModule,  // 数据库模块，提供数据库连接服务
     EmployeesModule,  // 员工模块，处理员工相关功能
@@ -22,7 +34,9 @@ import { MyLoggerModule } from './my-logger/my-logger.module';
       ttl: 60000,  // 1分钟内
       limit: 100  // 最多允许100个请求
     }]),
-    MyLoggerModule  // 自定义日志模块
+    MyLoggerModule, // 自定义日志模块
+    MediaModule,  // 媒体模块
+    AuthModule,
   ],
   controllers: [AppController],  // 应用主控制器
   providers: [AppService, {  // 应用服务提供者和全局守卫

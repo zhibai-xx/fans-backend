@@ -7,7 +7,7 @@ import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { MyLoggerService } from 'src/my-logger/my-logger.service';
 
 // @SkipThrottle()  // 跳过整个控制器的默认限流设置，还是默认好
-@Controller('users') // 定义控制器路由前缀为'users'
+@Controller('oldUsers') // 定义控制器路由前缀为'users'
 export class UsersController {
     constructor(private readonly usersService: UsersService) { } // 通过依赖注入引入用户服务
     private readonly logger = new MyLoggerService(UsersController.name)  // 使用自定义日志服务

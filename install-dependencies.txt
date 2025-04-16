@@ -1,0 +1,25 @@
+# 媒体模块所需依赖
+# 文件处理
+npm install --save @nestjs/platform-express
+npm install --save-dev @types/multer
+
+# 图片处理
+npm install --save sharp
+npm install --save-dev @types/sharp
+
+# 文件上传和静态文件服务
+npm install --save @nestjs/serve-static
+
+# UUID生成
+npm install --save uuid
+npm install --save-dev @types/uuid
+
+# 阿里云OSS SDK
+npm install --save ali-oss
+npm install --save-dev @types/ali-oss
+
+# 环境变量加载和配置管理
+npm install --save @nestjs/config
+
+# 运行所有依赖安装
+npm install 

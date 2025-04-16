@@ -10,31 +10,6 @@ export class UsersService {
     // 通过构造函数注入数据库服务
     constructor(private readonly databaseService: DatabaseService) { }
 
-    // 模拟用户数据，实际应用中通常会从数据库获取
-    private users = [
-        {
-            "id": 1,
-            "name": '11',
-            "email": '1@qq.com',
-            "role": 'INTERN'
-        }, {
-            "id": 2,
-            "name": '22',
-            "email": '2@qq.com',
-            "role": 'ADMIN'
-        }, {
-            "id": 3,
-            "name": '33',
-            "email": '3@qq.com',
-            "role": 'INTERN'
-        }, {
-            "id": 4,
-            "name": '44',
-            "email": '4@qq.com',
-            "role": 'ENGINEER'
-        }
-    ]
-
     /**
      * 查找所有用户，可以按角色筛选
      * @param role 可选的角色筛选参数

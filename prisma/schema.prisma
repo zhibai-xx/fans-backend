@@ -58,13 +58,16 @@ model Media {
   id          String   @id @default(uuid())
   title       String   @db.VarChar(200)       // 标题
   description String?  @db.VarChar(500)       // 描述
-  url         String                          // 资源URL（OSS存储路径）
+  url         String                          // 原始资源URL
   thumbnail_url String?                       // 缩略图URL
+  size        Int                             // 原始文件大小（字节）
   media_type  MediaType                      // 类型：IMAGE/VIDEO
   duration    Int?                           // 视频时长（秒）
-  width       Int?                           // 宽度（像素）
-  height      Int?                           // 高度（像素）
+  width       Int?                           // 原始视频宽度（像素）
+  height      Int?                           // 原始视频高度（像素）
   status      MediaStatus @default(PENDING)  // 审核状态
+  views       Int      @default(0)           // 观看次数
+  likes_count Int      @default(0)           // 点赞数
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
 
@@ -77,6 +80,7 @@ model Media {
   tags        MediaTag[]
   comments    Comment[]
   favorites   Favorite[]
+  video_qualities VideoQuality[] // 新增：视频清晰度关联
 
   @@index([user_id, status]) // 加速用户内容管理查询
 }
@@ -161,4 +165,21 @@ model Favorite {
   media      Media  @relation(fields: [media_id], references: [id])
 
   @@unique([user_id, media_id]) // 禁止重复收藏
+}
+
+// 新增：视频清晰度模型
+model VideoQuality {
+  id          String   @id @default(uuid())
+  media_id    String   @map("media_id")
+  media       Media    @relation(fields: [media_id], references: [id])
+  quality     String   @db.VarChar(20)  // 清晰度标识：如 '1080p', '720p', '480p'
+  url         String                    // 转码后的视频URL
+  size        Int                       // 转码后的文件大小（字节）
+  width       Int                       // 转码后的视频宽度
+  height      Int                       // 转码后的视频高度
+  bitrate     Int                       // 视频码率（kbps）
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@index([media_id, quality])
 }
