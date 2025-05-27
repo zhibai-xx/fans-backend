@@ -25,6 +25,7 @@ model User {
   email        String    @unique              // 邮箱（唯一）
   password     String                         // 加密后的密码
   phoneNumber  String?   // 手机号（可选）
+  nickname     String?   // 昵称
   avatar_url   String?   @default("default_avatar.png") // 头像URL
   role         UserRole  @default(USER)       // 角色：USER/ADMIN
   status       UserStatus @default(ACTIVE)    // 状态：ACTIVE/SUSPENDED

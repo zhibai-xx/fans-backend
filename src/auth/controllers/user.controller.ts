@@ -4,6 +4,7 @@ import { AuthService } from '../services/auth.service';
 import { RegisterDto } from '../dto/register.dto';
 import { LoginDto } from '../dto/login.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
+import { ChangePasswordDto } from '../dto/change-password.dto';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 
@@ -63,5 +64,17 @@ export class UserController {
   @ApiResponse({ status: 404, description: '用户不存在' })
   async getUserById(@Param('id') id: number) {
     return this.userService.findById(id);
+  }
+
+  @Put('change-password')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '修改密码' })
+  @ApiResponse({ status: 200, description: '密码修改成功' })
+  @ApiResponse({ status: 401, description: '当前密码错误或未授权' })
+  @ApiResponse({ status: 409, description: '新密码不能与当前密码相同' })
+  async changePassword(@Request() req, @Body() changePasswordDto: ChangePasswordDto) {
+    await this.userService.changePassword(req.user.id, changePasswordDto);
+    return { message: '密码修改成功' };
   }
 } 

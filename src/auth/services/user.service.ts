@@ -3,6 +3,7 @@ import { DatabaseService } from 'src/database/database.service';
 import { RegisterDto } from '../dto/register.dto';
 import { LoginDto } from '../dto/login.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
+import { ChangePasswordDto } from '../dto/change-password.dto';
 import * as bcrypt from 'bcrypt';
 import { Prisma } from '@prisma/client';
 
@@ -13,7 +14,7 @@ export class UserService {
   ) {}
 
   async register(registerDto: RegisterDto) {
-    const { username, email, password } = registerDto;
+    const { username, email, password, nickname } = registerDto;
 
     // 检查用户名或邮箱是否已存在
     const existingUser = await this.databaseService.user.findFirst({
@@ -32,13 +33,21 @@ export class UserService {
     // 加密密码
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // 构建用户数据
+    const userData = {
+      username,
+      email,
+      password: hashedPassword,
+    };
+
+    // 如果昵称存在则添加到数据中
+    if (nickname) {
+      Object.assign(userData, { nickname });
+    }
+
     // 创建新用户
     const user = await this.databaseService.user.create({
-      data: {
-        username,
-        email,
-        password: hashedPassword,
-      }
+      data: userData
     });
 
     return user;
@@ -99,11 +108,13 @@ export class UserService {
     }
 
     // 更新用户信息
-    const updateData: Prisma.UserUpdateInput = {};
+    const updateData: any = {};
     
     if (updateUserDto.username) updateData.username = updateUserDto.username;
     if (updateUserDto.email) updateData.email = updateUserDto.email;
     if (updateUserDto.avatar) updateData.avatar_url = updateUserDto.avatar;
+    if (updateUserDto.nickname !== undefined) updateData.nickname = updateUserDto.nickname;
+    if (updateUserDto.phoneNumber !== undefined) updateData.phoneNumber = updateUserDto.phoneNumber;
     
     return this.databaseService.user.update({
       where: { id },
@@ -133,5 +144,39 @@ export class UserService {
     }
     
     return user;
+  }
+
+  async changePassword(userId: number, changePasswordDto: ChangePasswordDto) {
+    const { currentPassword, newPassword } = changePasswordDto;
+
+    // 查找用户
+    const user = await this.databaseService.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      throw new NotFoundException('用户不存在');
+    }
+
+    // 验证当前密码
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('当前密码错误');
+    }
+
+    // 如果新密码与当前密码相同，则拒绝修改
+    const isSamePassword = await bcrypt.compare(newPassword, user.password);
+    if (isSamePassword) {
+      throw new ConflictException('新密码不能与当前密码相同');
+    }
+
+    // 加密新密码
+    const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+
+    // 更新密码
+    return this.databaseService.user.update({
+      where: { id: userId },
+      data: { password: hashedNewPassword }
+    });
   }
 } 

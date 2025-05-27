@@ -23,6 +23,8 @@ export class AuthService {
         id: user.id,
         username: user.username,
         email: user.email,
+        nickname: user.nickname,
+        phoneNumber: user.phoneNumber,
         avatar: user.avatar_url,
         role: user.role,
         status: user.status

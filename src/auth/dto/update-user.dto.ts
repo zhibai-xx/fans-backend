@@ -19,9 +19,20 @@ export class UpdateUserDto {
   @IsString({ message: '头像必须是字符串' })
   avatar?: string;
 
-  @ApiProperty({ description: '个人简介', example: '这是我的个人简介', required: false })
+  // @ApiProperty({ description: '个人简介', example: '这是我的个人简介', required: false })
+  // @IsOptional()
+  // @IsString({ message: '个人简介必须是字符串' })
+  // @MaxLength(200, { message: '个人简介长度不能超过200个字符' })
+  // bio?: string;
+
+  @ApiProperty({ description: '昵称', example: '这是我的昵称', required: false })
   @IsOptional()
-  @IsString({ message: '个人简介必须是字符串' })
-  @MaxLength(200, { message: '个人简介长度不能超过200个字符' })
-  bio?: string;
+  @IsString({ message: '昵称必须是字符串' })
+  @MaxLength(20, { message: '昵称长度不能超过20个字符' })
+  nickname?: string;
+
+  @ApiProperty({ description: '手机号码', example: '1**********', required: false })
+  @IsOptional()
+  @IsString({ message: '手机号码必须是字符串' })
+  phoneNumber?: string;
 } 

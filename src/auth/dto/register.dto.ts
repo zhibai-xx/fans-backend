@@ -17,6 +17,12 @@ export class RegisterDto {
   @ApiProperty({ description: '密码', example: 'password123' })
   @IsNotEmpty({ message: '密码不能为空' })
   @IsString({ message: '密码必须是字符串' })
-  @MinLength(6, { message: '密码长度不能少于6个字符' })
+  @MinLength(8, { message: '密码长度不能少于8个字符' })
   password: string;
+
+  @ApiProperty({ description: '昵称', example: '这是我的昵称', required: false })
+  @IsOptional()
+  @IsString({ message: '昵称必须是字符串' })
+  @MaxLength(20, { message: '昵称长度不能超过20个字符' })
+  nickname?: string;
 } 
