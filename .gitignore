@@ -13,12 +13,18 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 
-# Md
+# Documentation files (临时文档)
 backend.md
 learnX.md
 
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
 # Tests
 /coverage
@@ -40,6 +46,10 @@ learnX.md
 !.vscode/launch.json
 !.vscode/extensions.json
 
+# Cursor AI IDE
+.cursor/
+.cursorrules
+
 # dotenv environment variable files
 .env
 .env.development.local
@@ -59,3 +69,62 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Database
+*.sqlite
+*.sqlite3
+*.db
+
+# Prisma
+/prisma/migrations/**/migration.sql
+# 保留 schema.prisma 和 migration 结构，但不包含具体的 migration SQL
+
+# Upload directories (本地上传文件)
+/uploads/
+/temp/
+/public/uploads/
+
+# Cache directories
+.cache/
+.parcel-cache/
+
+# Optional npm cache directory
+.npm
+
+# Optional REPL history
+.node_repl_history
+
+# Test files (临时测试文件)
+test-*.js
+test-*.ts
+debug-*.js
+debug-*.ts
+
+# Installation notes
+install-dependencies.txt
+
+# TypeScript build info
+*.tsbuildinfo
+
+# PM2 process file
+ecosystem.config.js
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# SSL certificates
+*.pem
+*.key
+*.crt
+*.csr
+
+# Backup files
+*.backup
+*.bak
+*.swp
+*.swo
+
+# Local configuration files
+local.json
+config/local.json
