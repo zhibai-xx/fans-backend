@@ -10,11 +10,11 @@ export class MyLoggerService extends ConsoleLogger {
      * @param entry 日志条目内容
      */
     async logToFile(entry) {
-        // 格式化日志条目，添加时间戳
-        const formattedEntry = `${Intl.DateTimeFormat('en-US', {
+        // 格式化日志条目，添加时间戳（使用中国时区）
+        const formattedEntry = `${Intl.DateTimeFormat('zh-CN', {
             dateStyle: 'short',
-            timeStyle: 'short',
-            timeZone: 'America/Chicago'
+            timeStyle: 'medium',
+            timeZone: 'Asia/Shanghai'
         }).format(new Date())}\t${entry}\n`
 
         try {

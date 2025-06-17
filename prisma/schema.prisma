@@ -20,26 +20,28 @@ datasource db {
 // User 用户表
 // =====================================
 model User {
-  id           Int    @id @default(autoincrement())  // 用户ID,自增id性能优于uuid
-  username     String    @unique                    // 用户名（唯一）
-  email        String    @unique              // 邮箱（唯一）
-  password     String                         // 加密后的密码
-  phoneNumber  String?   // 手机号（可选）
-  nickname     String?   // 昵称
-  avatar_url   String?   @default("default_avatar.png") // 头像URL
-  role         UserRole  @default(USER)       // 角色：USER/ADMIN
-  status       UserStatus @default(ACTIVE)    // 状态：ACTIVE/SUSPENDED
-  created_at   DateTime  @default(now())
-  updated_at   DateTime  @updatedAt
+  id           Int    @id @default(autoincrement())  // 内部ID,自增id性能优于uuid
+  uuid         String @unique @default(uuid())       // 外部UUID,用于API和前端
+  username     String @unique                        // 用户名（唯一）
+  email        String @unique                        // 邮箱（唯一）
+  password     String                               // 加密后的密码
+  phoneNumber  String?                              // 手机号（可选）
+  nickname     String?                              // 昵称
+  avatar_url   String? @default("default_avatar.png") // 头像URL
+  role         UserRole @default(USER)              // 角色：USER/ADMIN
+  status       UserStatus @default(ACTIVE)          // 状态：ACTIVE/SUSPENDED
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
 
   // 关联关系
   uploaded_media Media[]   // 上传的内容
   comments      Comment[] 
   favorites     Favorite[]
+  uploads       Upload[]  // 上传记录
 
-  // @@index([username, email]) // 复合索引加速登录查询
   @@index([username])
   @@index([email])
+  @@index([uuid])  // 为UUID添加索引
 }
 
 enum UserRole {
@@ -82,6 +84,7 @@ model Media {
   comments    Comment[]
   favorites   Favorite[]
   video_qualities VideoQuality[] // 新增：视频清晰度关联
+  upload      Upload?   // 上传记录（一对一）
 
   @@index([user_id, status]) // 加速用户内容管理查询
 }
@@ -183,4 +186,45 @@ model VideoQuality {
   updated_at  DateTime @updatedAt
 
   @@index([media_id, quality])
+}
+
+// =====================================
+// Upload 上传记录表
+// =====================================
+model Upload {
+  id            String   @id @default(uuid())
+  filename      String   @db.VarChar(255)     // 原始文件名
+  file_size     BigInt                        // 文件大小（字节）
+  file_type     String   @db.VarChar(10)      // 文件类型：image/video
+  file_md5      String   @db.VarChar(32)      // 文件MD5值
+  chunk_size    Int                           // 分片大小
+  total_chunks  Int                           // 总分片数
+  uploaded_chunks Json   @default("[]")       // 已上传的分片索引数组
+  status        UploadStatus @default(PENDING) // 上传状态
+  temp_path     String?                       // 临时文件路径
+  final_path    String?                       // 最终文件路径
+  error_message String?                       // 错误信息
+  metadata      Json?                         // 元数据（标题、描述、标签等）
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  expires_at    DateTime?                     // 过期时间（用于清理未完成的上传）
+
+  // 关联关系
+  user_id       Int      @map("user_id")
+  user          User     @relation(fields: [user_id], references: [id])
+  media_id      String?  @unique              // 关联的媒体ID（上传完成后）
+  media         Media?   @relation(fields: [media_id], references: [id])
+
+  @@index([file_md5])
+  @@index([user_id, status])
+  @@index([expires_at])
+}
+
+enum UploadStatus {
+  PENDING    // 待上传
+  UPLOADING  // 上传中
+  MERGING    // 合并中
+  COMPLETED  // 已完成
+  FAILED     // 失败
+  EXPIRED    // 已过期
 }
