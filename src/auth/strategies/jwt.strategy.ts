@@ -18,6 +18,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!user) {
       throw new UnauthorizedException('用户不存在');
     }
+    // 验证UUID是否匹配（额外安全检查）
+    if (payload.uuid && user.uuid !== payload.uuid) {
+      throw new UnauthorizedException('令牌无效');
+    }
     return user;
   }
 } 

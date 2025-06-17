@@ -5,6 +5,7 @@ import { RegisterDto } from '../dto/register.dto';
 import { LoginDto } from '../dto/login.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
+import { UserResponseDto, PublicUserResponseDto } from '../dto/user-response.dto';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 
@@ -14,7 +15,7 @@ export class UserController {
   constructor(
     private readonly userService: UserService,
     private readonly authService: AuthService,
-  ) {}
+  ) { }
 
   @Post('register')
   @ApiOperation({ summary: '用户注册' })
@@ -38,32 +39,35 @@ export class UserController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: '获取当前用户信息' })
-  @ApiResponse({ status: 200, description: '获取成功' })
+  @ApiResponse({ status: 200, description: '获取成功', type: UserResponseDto })
   @ApiResponse({ status: 401, description: '未授权' })
   async getProfile(@Request() req) {
-    return this.userService.findById(req.user.id);
+    const user = await this.userService.findById(req.user.id);
+    return new UserResponseDto(user);
   }
 
   @Put('profile')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: '更新当前用户信息' })
-  @ApiResponse({ status: 200, description: '更新成功' })
+  @ApiResponse({ status: 200, description: '更新成功', type: UserResponseDto })
   @ApiResponse({ status: 401, description: '未授权' })
   @ApiResponse({ status: 409, description: '用户名或邮箱已被使用' })
   async updateProfile(@Request() req, @Body() updateUserDto: UpdateUserDto) {
-    return this.userService.updateUser(req.user.id, updateUserDto);
+    const user = await this.userService.updateUser(req.user.id, updateUserDto);
+    return new UserResponseDto(user);
   }
 
-  @Get(':id')
+  @Get(':uuid')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: '获取指定用户信息' })
-  @ApiResponse({ status: 200, description: '获取成功' })
+  @ApiOperation({ summary: '获取指定用户信息（公开信息）' })
+  @ApiResponse({ status: 200, description: '获取成功', type: PublicUserResponseDto })
   @ApiResponse({ status: 401, description: '未授权' })
   @ApiResponse({ status: 404, description: '用户不存在' })
-  async getUserById(@Param('id') id: number) {
-    return this.userService.findById(id);
+  async getUserByUuid(@Param('uuid') uuid: string) {
+    const user = await this.userService.findByUuid(uuid);
+    return new PublicUserResponseDto(user);
   }
 
   @Put('change-password')

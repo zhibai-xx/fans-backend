@@ -2,13 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UserService } from './user.service';
 import { LoginDto } from '../dto/login.dto';
+import { UserResponseDto } from '../dto/user-response.dto';
 
 @Injectable()
 export class AuthService {
   constructor(
     private userService: UserService,
     private jwtService: JwtService,
-  ) {}
+  ) { }
 
   async validateUser(username: string, password: string): Promise<any> {
     const user = await this.userService.login({ username, password } as LoginDto);
@@ -16,19 +17,15 @@ export class AuthService {
   }
 
   async login(user: any) {
-    const payload = { username: user.username, sub: user.id };
+    // JWT payload包含内部ID（用于性能）和UUID（用于安全）
+    const payload = {
+      username: user.username,
+      sub: user.id,  // 内部ID用于数据库查询性能
+      uuid: user.uuid  // UUID用于外部API安全
+    };
     return {
       access_token: this.jwtService.sign(payload),
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        nickname: user.nickname,
-        phoneNumber: user.phoneNumber,
-        avatar: user.avatar_url,
-        role: user.role,
-        status: user.status
-      },
+      user: new UserResponseDto(user),
     };
   }
 } 
