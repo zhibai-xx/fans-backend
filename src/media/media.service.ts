@@ -3,10 +3,10 @@ import { Injectable, NotFoundException, UnprocessableEntityException, ForbiddenE
 import { MediaType, MediaStatus, Prisma } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from 'src/database/database.service';
-import { StorageFactoryService } from './services/storage-factory.service';
 import { CreateMediaDto } from './dto/create-media.dto';
+import { CreateTagDto } from './dto/create-tag.dto';
+import { CreateCategoryDto } from './dto/create-category.dto';
 import { MyLoggerService } from 'src/my-logger/my-logger.service';
-import { FileUtils } from './utils/file.utils';
 
 @Injectable()
 export class MediaService {
@@ -15,84 +15,40 @@ export class MediaService {
     constructor(
         private readonly databaseService: DatabaseService,
         private configService: ConfigService,
-        private storageFactory: StorageFactoryService,
     ) { }
 
     /**
-     * 上传媒体文件并在数据库中创建记录
-     * @param file 上传的文件
-     * @param userId 用户ID
-     * @param createMediaDto 媒体信息
+     * 创建媒体记录（不包含文件上传）
+     * @param data 媒体数据
      * @returns 创建的媒体记录
      */
-    async uploadMedia(file: Express.Multer.File, userId: number, createMediaDto: CreateMediaDto) {
+    async create(data: {
+        title: string;
+        description?: string;
+        url: string;
+        size: number;
+        media_type: MediaType;
+        user_id: number;
+        category_id?: string;
+        tag_ids?: string[];
+    }) {
         try {
-            // 验证用户是否存在
-            const user = await this.databaseService.user.findUnique({
-                where: { id: userId }
-            });
-
-            if (!user) {
-                throw new NotFoundException('用户不存在');
-            }
-
-            // 验证文件类型
-            const allowedTypes = this.configService.get<string[]>('upload.local.allowedTypes', [
-                'image/jpeg', 'image/png', 'image/gif', 'video/mp4', 'video/quicktime'
-            ]);
-            
-            if (allowedTypes.length > 0 && !allowedTypes.includes(file.mimetype)) {
-                throw new UnprocessableEntityException(
-                    `不支持的文件类型: ${file.mimetype}。允许的类型: ${allowedTypes.join(', ')}`
-                );
-            }
-
-            // 验证文件大小
-            const maxSize = this.configService.get<number>('upload.local.maxSize', 104857600); // 默认100MB
-            if (file.size > maxSize) {
-                throw new UnprocessableEntityException(
-                    `文件过大。最大允许大小: ${maxSize / 1024 / 1024}MB`
-                );
-            }
-
-            // 确定媒体类型
-            let mediaType = createMediaDto.media_type || MediaType.IMAGE;
-            if (file.mimetype.startsWith('image/')) {
-                mediaType = MediaType.IMAGE;
-            } else if (file.mimetype.startsWith('video/')) {
-                mediaType = MediaType.VIDEO;
-            }
-
-            // 获取当前存储服务
-            const storageService = this.storageFactory.getStorage();
-
-            // 上传文件
-            const fileUrl = await storageService.uploadFile(file);
-            
-            // 生成缩略图（如果是图片）
-            let thumbnailUrl = '';
-            if (mediaType === MediaType.IMAGE && storageService.generateThumbnail) {
-                thumbnailUrl = await storageService.generateThumbnail(file, fileUrl);
-            }
-
-            // 准备创建数据
-            // 使用两步创建方式避免类型错误
-            const baseMediaData = {
-                title: createMediaDto.title,
-                description: createMediaDto.description,
-                url: fileUrl,
-                thumbnail_url: thumbnailUrl || null,
-                media_type: mediaType,
-                status: MediaStatus.PENDING,
-                size: file.size,
-                user: {
-                    connect: { id: userId }
-                }
-            };
-
-            // 首先创建基本记录
+            // 创建基本媒体记录
             const media = await this.databaseService.media.create({
-                data: baseMediaData as Prisma.MediaCreateInput,
+                data: {
+                    title: data.title,
+                    description: data.description,
+                    url: data.url,
+                    size: data.size,
+                    media_type: data.media_type,
+                    status: MediaStatus.PENDING,
+                    user: {
+                        connect: { id: data.user_id }
+                    },
+                    category: data.category_id ? {
+                        connect: { id: data.category_id }
+                    } : undefined
+                },
                 include: {
                     category: true,
                     tags: {
@@ -103,27 +59,31 @@ export class MediaService {
                 }
             });
 
-            // 如果提供了分类ID，更新分类
-            if (createMediaDto.category_id) {
-                await this.databaseService.media.update({
-                    where: { id: media.id },
-                    data: {
-                        category: {
-                            connect: { id: createMediaDto.category_id }
-                        }
+            // 如果提供了标签，创建关联
+            if (data.tag_ids && data.tag_ids.length > 0) {
+                // 先验证标签是否存在
+                const existingTags = await this.databaseService.tag.findMany({
+                    where: {
+                        id: { in: data.tag_ids }
                     }
                 });
-            }
 
-            // 如果提供了标签，创建关联
-            if (createMediaDto.tags && createMediaDto.tags.length > 0) {
-                for (const tagId of createMediaDto.tags) {
+                const existingTagIds = existingTags.map(tag => tag.id);
+
+                // 只关联存在的标签
+                for (const tagId of existingTagIds) {
                     await this.databaseService.mediaTag.create({
                         data: {
                             media: { connect: { id: media.id } },
                             tag: { connect: { id: tagId } }
                         }
                     });
+                }
+
+                // 如果有不存在的标签，记录警告
+                const missingTagIds = data.tag_ids.filter(id => !existingTagIds.includes(id));
+                if (missingTagIds.length > 0) {
+                    this.logger.warn(`以下标签ID不存在，已跳过: ${missingTagIds.join(', ')}`);
                 }
             }
 
@@ -140,21 +100,12 @@ export class MediaService {
                 }
             });
         } catch (error) {
-            // 记录错误日志
-            this.logger.error(`上传媒体失败: ${error.message}`, error.stack);
-            
-            // 如果错误是我们已知的类型，直接抛出
-            if (error instanceof NotFoundException || 
-                error instanceof UnprocessableEntityException ||
-                error instanceof ForbiddenException ||
-                error instanceof BadRequestException) {
-                throw error;
-            }
-            
-            // 其他错误转换为通用错误
-            throw new UnprocessableEntityException(`上传媒体失败: ${error.message}`);
+            this.logger.error(`创建媒体记录失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`创建媒体记录失败: ${error.message}`);
         }
     }
+
+
 
     /**
      * 获取所有媒体列表，支持按类型、用户和状态筛选
@@ -172,15 +123,15 @@ export class MediaService {
 
         // 构建查询条件
         const where: Prisma.MediaWhereInput = {};
-        
+
         if (userId) {
             where.user_id = userId;
         }
-        
+
         if (mediaType) {
             where.media_type = mediaType;
         }
-        
+
         if (status) {
             where.status = status;
         }
@@ -304,17 +255,9 @@ export class MediaService {
             throw new ForbiddenException('您没有权限删除此媒体');
         }
 
-        // 获取存储服务
-        const storageService = this.storageFactory.getStorage();
-
         try {
-            // 删除实际文件
-            await storageService.deleteFile(media.url);
-            
-            // 如果有缩略图，也删除
-            if (media.thumbnail_url) {
-                await storageService.deleteFile(media.thumbnail_url);
-            }
+            // 注意：实际文件删除现在由 upload 模块处理
+            // 这里只删除数据库记录
 
             // 删除关联的标签、评论和收藏
             await this.databaseService.$transaction([
@@ -367,5 +310,388 @@ export class MediaService {
         });
 
         return updatedMedia;
+    }
+
+    // =====================================
+    // 标签相关方法
+    // =====================================
+
+    /**
+     * 获取所有标签
+     * @returns 标签列表
+     */
+    async getAllTags() {
+        try {
+            const tags = await this.databaseService.tag.findMany({
+                orderBy: { created_at: 'desc' },
+                include: {
+                    _count: {
+                        select: {
+                            media_tags: true
+                        }
+                    }
+                }
+            });
+
+            return tags.map(tag => ({
+                id: tag.id,
+                name: tag.name,
+                created_at: tag.created_at,
+                usage_count: tag._count.media_tags
+            }));
+        } catch (error) {
+            this.logger.error(`获取标签列表失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`获取标签列表失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 创建新标签
+     * @param createTagDto 标签创建数据
+     * @returns 创建的标签
+     */
+    async createTag(createTagDto: CreateTagDto) {
+        try {
+            // 检查标签是否已存在
+            const existingTag = await this.databaseService.tag.findUnique({
+                where: { name: createTagDto.name }
+            });
+
+            if (existingTag) {
+                throw new BadRequestException('标签已存在');
+            }
+
+            // 创建新标签
+            const tag = await this.databaseService.tag.create({
+                data: {
+                    name: createTagDto.name
+                }
+            });
+
+            this.logger.log(`创建新标签: ${tag.name}`, MediaService.name);
+            return tag;
+        } catch (error) {
+            this.logger.error(`创建标签失败: ${error.message}`, error.stack);
+
+            if (error instanceof BadRequestException) {
+                throw error;
+            }
+
+            throw new UnprocessableEntityException(`创建标签失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 根据ID获取标签详情
+     * @param id 标签ID
+     * @returns 标签详情
+     */
+    async getTagById(id: string) {
+        try {
+            const tag = await this.databaseService.tag.findUnique({
+                where: { id },
+                include: {
+                    media_tags: {
+                        include: {
+                            media: {
+                                select: {
+                                    id: true,
+                                    title: true,
+                                    thumbnail_url: true,
+                                    media_type: true,
+                                    created_at: true
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            if (!tag) {
+                throw new NotFoundException('标签不存在');
+            }
+
+            return {
+                id: tag.id,
+                name: tag.name,
+                created_at: tag.created_at,
+                media: tag.media_tags.map(mt => mt.media)
+            };
+        } catch (error) {
+            this.logger.error(`获取标签详情失败: ${error.message}`, error.stack);
+
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+
+            throw new UnprocessableEntityException(`获取标签详情失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 删除标签
+     * @param id 标签ID
+     * @returns 删除结果
+     */
+    async deleteTag(id: string) {
+        try {
+            // 检查标签是否存在
+            const tag = await this.databaseService.tag.findUnique({
+                where: { id }
+            });
+
+            if (!tag) {
+                throw new NotFoundException('标签不存在');
+            }
+
+            // 删除标签及其关联关系
+            await this.databaseService.$transaction([
+                // 删除媒体标签关联
+                this.databaseService.mediaTag.deleteMany({
+                    where: { tag_id: id }
+                }),
+                // 删除标签
+                this.databaseService.tag.delete({
+                    where: { id }
+                })
+            ]);
+
+            this.logger.log(`删除标签: ${tag.name}`, MediaService.name);
+            return { success: true, message: '标签已成功删除' };
+        } catch (error) {
+            this.logger.error(`删除标签失败: ${error.message}`, error.stack);
+
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+
+            throw new UnprocessableEntityException(`删除标签失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 搜索标签（按名称模糊匹配）
+     * @param query 搜索关键词
+     * @returns 匹配的标签列表
+     */
+    async searchTags(query: string) {
+        try {
+            const tags = await this.databaseService.tag.findMany({
+                where: {
+                    name: {
+                        contains: query,
+                        mode: 'insensitive'
+                    }
+                },
+                orderBy: { created_at: 'desc' },
+                take: 20 // 限制返回数量
+            });
+
+            return tags;
+        } catch (error) {
+            this.logger.error(`搜索标签失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`搜索标签失败: ${error.message}`);
+        }
+    }
+
+    // =====================================
+    // 分类相关方法
+    // =====================================
+
+    /**
+     * 获取所有分类
+     * @returns 分类列表
+     */
+    async getAllCategories() {
+        try {
+            const categories = await this.databaseService.category.findMany({
+                orderBy: { created_at: 'desc' },
+                include: {
+                    _count: {
+                        select: {
+                            media: true
+                        }
+                    }
+                }
+            });
+
+            return categories.map(category => ({
+                id: category.id,
+                name: category.name,
+                description: category.description,
+                created_at: category.created_at,
+                media_count: category._count.media
+            }));
+        } catch (error) {
+            this.logger.error(`获取分类列表失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`获取分类列表失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 创建新分类
+     * @param createCategoryDto 分类创建数据
+     * @returns 创建的分类
+     */
+    async createCategory(createCategoryDto: CreateCategoryDto) {
+        try {
+            // 检查分类是否已存在
+            const existingCategory = await this.databaseService.category.findUnique({
+                where: { name: createCategoryDto.name }
+            });
+
+            if (existingCategory) {
+                throw new BadRequestException('分类已存在');
+            }
+
+            // 创建新分类
+            const category = await this.databaseService.category.create({
+                data: {
+                    name: createCategoryDto.name,
+                    description: createCategoryDto.description
+                }
+            });
+
+            this.logger.log(`创建新分类: ${category.name}`, MediaService.name);
+            return category;
+        } catch (error) {
+            this.logger.error(`创建分类失败: ${error.message}`, error.stack);
+
+            if (error instanceof BadRequestException) {
+                throw error;
+            }
+
+            throw new UnprocessableEntityException(`创建分类失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 根据ID获取分类详情
+     * @param id 分类ID
+     * @returns 分类详情
+     */
+    async getCategoryById(id: string) {
+        try {
+            const category = await this.databaseService.category.findUnique({
+                where: { id },
+                include: {
+                    media: {
+                        select: {
+                            id: true,
+                            title: true,
+                            thumbnail_url: true,
+                            media_type: true,
+                            created_at: true
+                        },
+                        orderBy: { created_at: 'desc' },
+                        take: 20 // 限制返回的媒体数量
+                    }
+                }
+            });
+
+            if (!category) {
+                throw new NotFoundException('分类不存在');
+            }
+
+            return category;
+        } catch (error) {
+            this.logger.error(`获取分类详情失败: ${error.message}`, error.stack);
+
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+
+            throw new UnprocessableEntityException(`获取分类详情失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 删除分类
+     * @param id 分类ID
+     * @returns 删除结果
+     */
+    async deleteCategory(id: string) {
+        try {
+            // 检查分类是否存在
+            const category = await this.databaseService.category.findUnique({
+                where: { id }
+            });
+
+            if (!category) {
+                throw new NotFoundException('分类不存在');
+            }
+
+            // 检查是否有媒体使用此分类
+            const mediaCount = await this.databaseService.media.count({
+                where: { category_id: id }
+            });
+
+            if (mediaCount > 0) {
+                throw new BadRequestException(`无法删除分类，还有 ${mediaCount} 个媒体正在使用此分类`);
+            }
+
+            // 删除分类
+            await this.databaseService.category.delete({
+                where: { id }
+            });
+
+            this.logger.log(`删除分类: ${category.name}`, MediaService.name);
+            return { success: true, message: '分类已成功删除' };
+        } catch (error) {
+            this.logger.error(`删除分类失败: ${error.message}`, error.stack);
+
+            if (error instanceof NotFoundException || error instanceof BadRequestException) {
+                throw error;
+            }
+
+            throw new UnprocessableEntityException(`删除分类失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 更新分类信息
+     * @param id 分类ID
+     * @param updateData 更新数据
+     * @returns 更新后的分类
+     */
+    async updateCategory(id: string, updateData: Partial<CreateCategoryDto>) {
+        try {
+            // 检查分类是否存在
+            const existingCategory = await this.databaseService.category.findUnique({
+                where: { id }
+            });
+
+            if (!existingCategory) {
+                throw new NotFoundException('分类不存在');
+            }
+
+            // 如果要更新名称，检查新名称是否已存在
+            if (updateData.name && updateData.name !== existingCategory.name) {
+                const nameExists = await this.databaseService.category.findUnique({
+                    where: { name: updateData.name }
+                });
+
+                if (nameExists) {
+                    throw new BadRequestException('分类名称已存在');
+                }
+            }
+
+            // 更新分类
+            const updatedCategory = await this.databaseService.category.update({
+                where: { id },
+                data: updateData
+            });
+
+            this.logger.log(`更新分类: ${updatedCategory.name}`, MediaService.name);
+            return updatedCategory;
+        } catch (error) {
+            this.logger.error(`更新分类失败: ${error.message}`, error.stack);
+
+            if (error instanceof NotFoundException || error instanceof BadRequestException) {
+                throw error;
+            }
+
+            throw new UnprocessableEntityException(`更新分类失败: ${error.message}`);
+        }
     }
 }

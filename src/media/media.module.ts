@@ -3,29 +3,16 @@ import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
 import { ConfigModule } from '@nestjs/config';
 import { DatabaseModule } from 'src/database/database.module';
-import { LocalStorageService } from './services/local-storage.service';
-import { OssStorageService } from './services/oss-storage.service';
-import { StorageFactoryService } from './services/storage-factory.service';
-import { ServeStaticModule } from '@nestjs/serve-static';
-import { join } from 'path';
-import { FileController } from './controllers/file.controller';
+import { AuthModule } from 'src/auth/auth.module';
 
 @Module({
   imports: [
-    ConfigModule, 
+    ConfigModule,
     DatabaseModule,
-    // 提供静态文件访问功能（仅在本地存储模式下使用）
-    ServeStaticModule.forRoot({
-      rootPath: join(__dirname, '..', '..', 'uploads'),
-      serveRoot: '/api/media/file',
-    }),
+    AuthModule,
   ],
-  controllers: [MediaController, FileController],
-  providers: [
-    MediaService,
-    LocalStorageService,
-    OssStorageService,
-    StorageFactoryService
-  ]
+  controllers: [MediaController],
+  providers: [MediaService],
+  exports: [MediaService],
 })
-export class MediaModule {}
+export class MediaModule { }
