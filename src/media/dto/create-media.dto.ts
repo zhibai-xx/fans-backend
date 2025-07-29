@@ -1,5 +1,6 @@
-import { IsString, IsOptional, IsUUID, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsUUID, IsEnum, ValidateIf } from 'class-validator';
 import { MediaType } from '@prisma/client';
+import { Transform } from 'class-transformer';
 
 export class CreateMediaDto {
     /**
@@ -16,14 +17,20 @@ export class CreateMediaDto {
     @IsString()
     @IsOptional()
     description?: string;
-    
+
     /**
-     * 分类ID（可选）
+     * 分类ID（可选） - 自动转换空字符串为undefined
      */
+    @Transform(({ value }) => {
+        if (value === '' || value === null) {
+            return undefined;
+        }
+        return value;
+    })
+    @ValidateIf((o) => o.category_id !== undefined)
     @IsUUID()
-    @IsOptional()
     category_id?: string;
-    
+
     /**
      * 媒体类型（图片/视频）
      * @example "IMAGE"
@@ -31,7 +38,7 @@ export class CreateMediaDto {
     @IsEnum(MediaType)
     @IsOptional()
     media_type?: MediaType;
-    
+
     /**
      * 标签IDs数组（可选）
      */

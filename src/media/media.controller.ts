@@ -2,27 +2,40 @@ import { MediaService } from './media.service';
 import {
     Body, Controller, Delete, Get, Param,
     Patch, Post, Query, ParseIntPipe,
-    HttpStatus, Req, HttpCode, UseGuards
+    HttpStatus, Req, HttpCode, UseGuards,
+    UseInterceptors, ClassSerializerInterceptor, Res, NotFoundException, Request
 } from '@nestjs/common';
 import { MediaType, MediaStatus } from '@prisma/client';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { MyLoggerService } from 'src/my-logger/my-logger.service';
 import { CreateMediaDto } from './dto/create-media.dto';
+import { UpdateMediaDto } from './dto/update-media.dto';
 import { CreateTagDto } from './dto/create-tag.dto';
 import { CreateCategoryDto } from './dto/create-category.dto';
+import {
+    BatchUpdateStatusDto,
+    BatchUpdateTagsDto,
+    BatchUpdateCategoryDto,
+    ReviewFilterDto,
+    ReviewStatsDto,
+    BatchOperationResultDto
+} from './dto/review.dto';
 import { MediaResponseDto, MediaListResponseDto } from './dto/media-response.dto';
-import { Request } from 'express';
+import { Request as ExpressRequest } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { AdminRoleGuard } from 'src/auth/guards/admin-role.guard';
 import { UserUuidService } from 'src/auth/services/user-uuid.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { UserUploadFiltersDto } from './dto/user-upload-record.dto';
 
 // 扩展 Request 类型，定义需要的 user 属性
 // 注意：这个接口只用于类型定义，不会影响运行时的行为
-type RequestWithUser = Request & { user: { id: number, [key: string]: any } };
+type RequestWithUser = ExpressRequest & { user: { id: number, [key: string]: any } };
 
 @ApiTags('媒体')
 @Controller('media')
+@UseInterceptors(ClassSerializerInterceptor)
 export class MediaController {
     constructor(
         private readonly mediaService: MediaService,
@@ -53,7 +66,7 @@ export class MediaController {
         @Query('skip', new ParseIntPipe({ optional: true })) skip?: number,
         @Query('take', new ParseIntPipe({ optional: true })) take?: number,
     ) {
-        this.logger.log(`获取媒体列表: userUuid=${userUuid}, type=${type}, status=${status}`, MediaController.name);
+        this.logger.log(`获取媒体列表: userUuid=${userUuid}, type=${type}, status=${status}, skip=${skip}, take=${take}`, MediaController.name);
 
         // 如果提供了userUuid，转换为内部ID
         let userId: number | undefined;
@@ -327,6 +340,161 @@ export class MediaController {
         const adminId = req.user.id;
         this.logger.log(`管理员 ${adminId} 更新媒体状态: ${id} -> ${status}`, MediaController.name);
         return this.mediaService.updateStatus(id, status, adminId);
+    }
+
+    // =====================================
+    // 审核相关接口
+    // =====================================
+
+    /**
+     * 获取审核统计信息（管理员专用）
+     * @returns 审核统计数据
+     */
+    @Get('review/stats')
+    @UseGuards(JwtAuthGuard, AdminRoleGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: '获取审核统计信息（管理员专用）' })
+    @ApiResponse({ status: 200, description: '获取成功', type: ReviewStatsDto })
+    @ApiResponse({ status: 401, description: '未授权' })
+    @ApiResponse({ status: 403, description: '需要管理员权限' })
+    async getReviewStats(@Req() req: any): Promise<ReviewStatsDto> {
+        this.logger.log('获取审核统计信息', MediaController.name);
+        const stats = await this.mediaService.getReviewStats();
+        return stats;
+    }
+
+    /**
+     * 获取待审核媒体列表（管理员专用）
+     * @param filters 筛选条件
+     * @returns 待审核媒体列表
+     */
+    @Get('review/list')
+    @UseGuards(JwtAuthGuard, AdminRoleGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: '获取待审核媒体列表（管理员专用）' })
+    @ApiResponse({ status: 200, description: '获取成功', type: MediaListResponseDto })
+    @ApiResponse({ status: 401, description: '未授权' })
+    @ApiResponse({ status: 403, description: '需要管理员权限' })
+    async getMediaForReview(@Query() filters: ReviewFilterDto): Promise<MediaListResponseDto> {
+        this.logger.log(`获取待审核媒体列表: ${JSON.stringify(filters)}`, MediaController.name);
+
+        const result = await this.mediaService.getMediaForReview(filters, this.userUuidService);
+
+        // 获取所有用户的UUID映射
+        const userIds = result.data.map(media => media.user_id);
+        const userUuidMapping = await this.userUuidService.getUuidMappingByIds(userIds);
+
+        // 转换响应数据
+        const mediaList = result.data.map(media =>
+            new MediaResponseDto(media, userUuidMapping[media.user_id])
+        );
+
+        return new MediaListResponseDto(mediaList, result.meta);
+    }
+
+    /**
+     * 批量更新媒体状态（管理员专用）
+     * @param dto 批量更新数据
+     * @param req 请求对象（获取管理员ID）
+     * @returns 批量操作结果
+     */
+    @Post('review/batch-status')
+    @UseGuards(JwtAuthGuard, AdminRoleGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: '批量更新媒体状态（管理员专用）' })
+    @ApiResponse({ status: 200, description: '批量更新成功', type: BatchOperationResultDto })
+    @ApiResponse({ status: 401, description: '未授权' })
+    @ApiResponse({ status: 403, description: '需要管理员权限' })
+    async batchUpdateStatus(
+        @Body() dto: BatchUpdateStatusDto,
+        @Req() req: RequestWithUser
+    ): Promise<BatchOperationResultDto> {
+        const adminId = req.user.id;
+        this.logger.log(`管理员 ${adminId} 批量更新媒体状态: ${dto.mediaIds.length} 个媒体 -> ${dto.status}`, MediaController.name);
+        return this.mediaService.batchUpdateStatus(dto, adminId);
+    }
+
+    /**
+     * 批量更新媒体标签（管理员专用）
+     * @param dto 批量标签更新数据
+     * @param req 请求对象（获取管理员ID）
+     * @returns 批量操作结果
+     */
+    @Post('review/batch-tags')
+    @UseGuards(JwtAuthGuard, AdminRoleGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: '批量更新媒体标签（管理员专用）' })
+    @ApiResponse({ status: 200, description: '批量更新成功', type: BatchOperationResultDto })
+    @ApiResponse({ status: 401, description: '未授权' })
+    @ApiResponse({ status: 403, description: '需要管理员权限' })
+    async batchUpdateTags(
+        @Body() dto: BatchUpdateTagsDto,
+        @Req() req: RequestWithUser
+    ): Promise<BatchOperationResultDto> {
+        const adminId = req.user.id;
+        this.logger.log(`管理员 ${adminId} 批量更新媒体标签: ${dto.mediaIds.length} 个媒体`, MediaController.name);
+        return this.mediaService.batchUpdateTags(dto, adminId);
+    }
+
+    /**
+     * 批量更新媒体分类（管理员专用）
+     * @param dto 批量分类更新数据
+     * @param req 请求对象（获取管理员ID）
+     * @returns 批量操作结果
+     */
+    @Post('review/batch-category')
+    @UseGuards(JwtAuthGuard, AdminRoleGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: '批量更新媒体分类（管理员专用）' })
+    @ApiResponse({ status: 200, description: '批量更新成功', type: BatchOperationResultDto })
+    @ApiResponse({ status: 401, description: '未授权' })
+    @ApiResponse({ status: 403, description: '需要管理员权限' })
+    async batchUpdateCategory(
+        @Body() dto: BatchUpdateCategoryDto,
+        @Req() req: RequestWithUser
+    ): Promise<BatchOperationResultDto> {
+        const adminId = req.user.id;
+        this.logger.log(`管理员 ${adminId} 批量更新媒体分类: ${dto.mediaIds.length} 个媒体 -> ${dto.categoryId || '无分类'}`, MediaController.name);
+        return this.mediaService.batchUpdateCategory(dto, adminId);
+    }
+
+    // =====================================
+    // 媒体信息管理接口（管理员专用）
+    // =====================================
+
+    /**
+     * 更新媒体信息（管理员专用）
+     * @param id 媒体ID
+     * @param updateMediaDto 更新数据
+     * @param req 请求对象（获取管理员ID）
+     * @returns 更新后的媒体信息
+     */
+    @Patch(':id/info')
+    @UseGuards(JwtAuthGuard, AdminRoleGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: '更新媒体信息（管理员专用）' })
+    @ApiResponse({ status: 200, description: '更新成功', type: MediaResponseDto })
+    @ApiResponse({ status: 401, description: '未授权' })
+    @ApiResponse({ status: 403, description: '需要管理员权限' })
+    @ApiResponse({ status: 404, description: '媒体不存在' })
+    async updateMediaInfo(
+        @Param('id') id: string,
+        @Body() updateMediaDto: UpdateMediaDto,
+        @Req() req: RequestWithUser
+    ): Promise<MediaResponseDto> {
+        const adminId = req.user.id;
+        this.logger.log(`管理员 ${adminId} 更新媒体信息: ${id}`, MediaController.name);
+
+        const result = await this.mediaService.updateMediaInfo(id, updateMediaDto, adminId);
+
+        if (!result) {
+            throw new NotFoundException('媒体不存在');
+        }
+
+        // 获取用户UUID
+        const userUuid = await this.userUuidService.getUuidByInternalId(result.user_id);
+
+        return new MediaResponseDto(result, userUuid);
     }
 
 }

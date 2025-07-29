@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { MediaType, MediaStatus } from '@prisma/client';
+import { Transform } from 'class-transformer';
 
 export class MediaUserDto {
   @ApiProperty({ description: '用户UUID' })
@@ -71,11 +72,23 @@ export class MediaResponseDto {
   @ApiProperty({ description: '点赞数' })
   likes_count: number;
 
+  @ApiProperty({ description: '媒体来源' })
+  source: string;
+
+  @ApiProperty({ description: '原始创建时间（微博发布时间等）', required: false })
+  @Transform(({ value }) => value ? new Date(value).toISOString() : null)
+  original_created_at?: Date;
+
+  @ApiProperty({ description: '来源相关元数据', required: false })
+  source_metadata?: any;
+
   @ApiProperty({ description: '创建时间' })
-  created_at: Date;
+  @Transform(({ value }) => value ? new Date(value).toISOString() : new Date().toISOString())
+  created_at: string;
 
   @ApiProperty({ description: '更新时间' })
-  updated_at: Date;
+  @Transform(({ value }) => value ? new Date(value).toISOString() : new Date().toISOString())
+  updated_at: string;
 
   @ApiProperty({ description: '用户信息', type: MediaUserDto })
   user: MediaUserDto;
@@ -90,8 +103,11 @@ export class MediaResponseDto {
     this.id = media.id;
     this.title = media.title;
     this.description = media.description;
-    this.url = media.url;
-    this.thumbnail_url = media.thumbnail_url;
+
+    // 修复URL路径 - 转换为完整的可访问URL
+    this.url = this.convertToAccessibleUrl(media.url);
+    this.thumbnail_url = media.thumbnail_url ? this.convertToAccessibleUrl(media.thumbnail_url) : undefined;
+
     this.size = media.size;
     this.media_type = media.media_type;
     this.duration = media.duration;
@@ -100,6 +116,11 @@ export class MediaResponseDto {
     this.status = media.status;
     this.views = media.views;
     this.likes_count = media.likes_count;
+    this.source = media.source;
+    this.original_created_at = media.original_created_at;
+    this.source_metadata = media.source_metadata;
+
+    // 直接赋值，让@Transform装饰器处理序列化
     this.created_at = media.created_at;
     this.updated_at = media.updated_at;
 
@@ -122,6 +143,33 @@ export class MediaResponseDto {
       id: mediaTag.tag.id,
       name: mediaTag.tag.name,
     })) || [];
+  }
+
+  /**
+   * 将相对路径转换为完整的可访问URL
+   * 从 "uploads/image/xxx.jpg" 转换为 "http://localhost:3000/api/upload/file/image/xxx.jpg"
+   */
+  private convertToAccessibleUrl(relativePath: string): string {
+    if (!relativePath) return '';
+
+    // 如果已经是完整URL，直接返回
+    if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
+      return relativePath;
+    }
+
+    // 如果已经是API路径，直接返回
+    if (relativePath.startsWith('/api/upload/file/')) {
+      return `http://localhost:3000${relativePath}`;
+    }
+
+    // 处理相对路径：移除uploads/前缀，保留子目录
+    // "uploads/image/xxx.jpg" -> "image/xxx.jpg"
+    let cleanPath = relativePath;
+    if (cleanPath.startsWith('uploads/')) {
+      cleanPath = cleanPath.substring('uploads/'.length);
+    }
+
+    return `http://localhost:3000/api/upload/file/${cleanPath}`;
   }
 }
 
