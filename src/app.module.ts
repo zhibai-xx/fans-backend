@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DatabaseModule } from './database/database.module';
@@ -10,41 +10,52 @@ import { MediaModule } from './media/media.module';
 import { ConfigModule } from '@nestjs/config';
 import uploadConfig from './config/upload.config';
 import ossConfig from './config/oss.config';
-import { validate } from './config/env.validation'; // 如果添加了验证
+import performanceConfig from './config/performance.config';
+import { validate } from './config/env.validation';
 import { AuthModule } from './auth/auth.module';
 import { UploadModule } from './upload/upload.module';
+import { PerformanceModule } from './common/performance.module';
+import { PerformanceMiddleware } from './common/middleware/performance.middleware';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
-      isGlobal: true,       // 全局可用
-      load: [uploadConfig, ossConfig], // 加载自定义配置
-      validate, // 启用环境变量验证（可选）
-      envFilePath: ['.env'],  // 指定环境文件路径
+      isGlobal: true,
+      load: [uploadConfig, ossConfig, performanceConfig],
+      validate,
+      envFilePath: ['.env'],
     }),
-    DatabaseModule,  // 数据库模块，提供数据库连接服务
-    EmployeesModule,  // 员工模块，处理员工相关功能
-    ThrottlerModule.forRoot([{  // 限流模块配置，防止API过度使用
-      name: 'short',  // 短期限流策略
-      ttl: 1000,  // 1秒内
-      limit: 10  // 最多允许10个请求（上传需要更多请求）
+    DatabaseModule,
+    EmployeesModule,
+    ThrottlerModule.forRoot([{
+      name: 'short',
+      ttl: 1000,
+      limit: 10
     }, {
-      name: 'medium',  // 中期限流策略
-      ttl: 10000,  // 10秒内
-      limit: 50  // 最多允许50个请求
+      name: 'medium',
+      ttl: 10000,
+      limit: 50
     }, {
-      name: 'long',  // 长期限流策略
-      ttl: 60000,  // 1分钟内
-      limit: 200  // 最多允许200个请求（上传测试需要更多）
+      name: 'long',
+      ttl: 60000,
+      limit: 200
     }]),
-    MyLoggerModule, // 自定义日志模块
-    MediaModule,  // 媒体模块
-    AuthModule, UploadModule,
+    MyLoggerModule,
+    MediaModule,
+    AuthModule,
+    UploadModule,
+    PerformanceModule,
   ],
-  controllers: [AppController],  // 应用主控制器
-  providers: [AppService, {  // 应用服务提供者和全局守卫
-    provide: APP_GUARD,  // 注册全局守卫
-    useClass: ThrottlerGuard  // 使用限流守卫
+  controllers: [AppController],
+  providers: [AppService, {
+    provide: APP_GUARD,
+    useClass: ThrottlerGuard
   }],
 })
-export class AppModule { }
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(PerformanceMiddleware)
+      .forRoutes('*');
+  }
+}
