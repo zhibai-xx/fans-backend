@@ -1,0 +1,51 @@
+{
+  "timestamp": "2025-07-16T11:12:07.951Z",
+  "summary": {
+    "total": 8,
+    "passed": 8,
+    "failed": 0,
+    "successRate": "100.00%"
+  },
+  "details": [
+    {
+      "name": "数据库连接测试",
+      "passed": true,
+      "message": "数据库连接正常"
+    },
+    {
+      "name": "微博文件扫描",
+      "passed": true,
+      "message": "扫描成功: 发现365个文件，2个用户"
+    },
+    {
+      "name": "微博文件预览",
+      "passed": true,
+      "message": "预览成功: 文件20250618T_5178828026545249_1.jpg，大小10208116字节"
+    },
+    {
+      "name": "性能监控API",
+      "passed": true,
+      "message": "性能监控正常: 评分100，平均查询时间0ms"
+    },
+    {
+      "name": "缓存统计",
+      "passed": true,
+      "message": "缓存统计正常: 缓存条目0个"
+    },
+    {
+      "name": "缓存清理",
+      "passed": true,
+      "message": "缓存清理成功"
+    },
+    {
+      "name": "数据库优化建议",
+      "passed": true,
+      "message": "优化建议获取成功: 未使用索引19个"
+    },
+    {
+      "name": "响应时间测试",
+      "passed": true,
+      "message": "平均响应时间: 8.00ms"
+    }
+  ]
+}
