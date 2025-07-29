@@ -34,10 +34,11 @@ model User {
   updated_at   DateTime @updatedAt
 
   // 关联关系
-  uploaded_media Media[]   // 上传的内容
+  uploaded_media Media[]   @relation("MediaUploader") // 上传的内容
   comments      Comment[] 
   favorites     Favorite[]
   uploads       Upload[]  // 上传记录
+  reviewed_media Media[]  @relation("MediaReviewer") // 审核的媒体
 
   @@index([username])
   @@index([email])
@@ -69,15 +70,22 @@ model Media {
   width       Int?                           // 原始视频宽度（像素）
   height      Int?                           // 原始视频高度（像素）
   status      MediaStatus @default(PENDING)  // 审核状态
+  review_comment String?  @db.VarChar(500)   // 审核备注（拒绝原因、审核建议等）
+  reviewed_by Int?                           // 审核员ID
+  reviewed_at DateTime?                      // 审核时间
   views       Int      @default(0)           // 观看次数
   likes_count Int      @default(0)           // 点赞数
+  source      MediaSource @default(USER_UPLOAD) // 媒体来源
+  original_created_at DateTime?              // 原始创建时间（微博发布时间等）
+  source_metadata Json?                      // 来源相关元数据（微博ID、转发数等）
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
 
   // 关联关系
   // relation定义模型之间的关联关系，fields: [外键], references: [主键]
   user_id     Int   @map("user_id") // 将 Prisma 模型中的字段名映射到数据库表中的实际列名
-  user        User     @relation(fields: [user_id], references: [id]) // 表示通过 user_id 关联到 User 表的 id
+  user        User     @relation("MediaUploader", fields: [user_id], references: [id]) // 表示通过 user_id 关联到 User 表的 id
+  reviewer    User?    @relation("MediaReviewer", fields: [reviewed_by], references: [id]) // 审核员关联
   category_id String?
   category    Category? @relation(fields: [category_id], references: [id])
   tags        MediaTag[]
@@ -87,6 +95,8 @@ model Media {
   upload      Upload?   // 上传记录（一对一）
 
   @@index([user_id, status]) // 加速用户内容管理查询
+  @@index([source, original_created_at]) // 加速按来源和原始时间查询
+  @@index([reviewed_by, reviewed_at]) // 加速审核员查询
 }
 
 enum MediaType {
@@ -99,6 +109,13 @@ enum MediaStatus {
   APPROVED  // 已发布
   REJECTED  // 已拒绝
   PRIVATE   // 用户暂存，不发布
+}
+
+enum MediaSource {
+  USER_UPLOAD  // 用户上传
+  WEIBO_CRAWL  // 微博爬取
+  API_IMPORT   // API导入
+  BATCH_IMPORT // 批量导入
 }
 
 // =====================================

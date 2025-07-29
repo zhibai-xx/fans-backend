@@ -1,8 +1,11 @@
 import { Module } from '@nestjs/common';
 import { DatabaseService } from './database.service';
+import { DatabasePerformanceService } from './database-performance.service';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
-  providers: [DatabaseService],  // 提供DatabaseService服务
-  exports: [DatabaseService]     // 导出DatabaseService，使其他模块可以使用它
+  imports: [ConfigModule],
+  providers: [DatabaseService, DatabasePerformanceService],
+  exports: [DatabaseService, DatabasePerformanceService],
 })
-export class DatabaseModule {}
+export class DatabaseModule { }
