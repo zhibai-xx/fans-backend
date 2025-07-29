@@ -12,6 +12,8 @@ import {
   HttpStatus,
   Logger,
   Req,
+  Res,
+  Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -23,6 +25,7 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AdminRoleGuard } from '../auth/guards/admin-role.guard';
 import { Throttle } from '@nestjs/throttler';
 import { UploadService } from './upload.service';
 import {
@@ -33,7 +36,7 @@ import {
   InitUploadResponse,
   UploadProgressResponse,
 } from './dto/upload.dto';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 
 @ApiTags('upload')
 @Controller('upload')
@@ -200,5 +203,85 @@ export class UploadController {
     const userId = (req.user as any).id;
     this.logger.log(`用户 ${userId} 取消上传: ${uploadId}`);
     await this.uploadService.cancelUpload(uploadId, userId);
+  }
+
+  /**
+   * 扫描weibo文件夹（仅管理员）
+   */
+  @Post('weibo-scan')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '扫描weibo文件夹中的媒体文件（仅管理员）' })
+  @ApiResponse({ status: 200, description: '扫描成功' })
+  @ApiResponse({ status: 401, description: '未授权' })
+  @ApiResponse({ status: 403, description: '需要管理员权限' })
+  async scanWeiboFiles(@Body() body: { customPath?: string }, @Req() req: Request) {
+    try {
+      const userId = (req.user as any).id;
+      const userRole = (req.user as any).role;
+      this.logger.log(`管理员 ${userId} (${userRole}) 扫描weibo文件夹: ${body.customPath || '默认路径'}`);
+      const result = await this.uploadService.scanWeiboDirectory(body.customPath);
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      this.logger.error('扫描weibo文件夹失败:', error);
+      throw new Error('扫描weibo文件夹失败');
+    }
+  }
+
+  /**
+   * 预览weibo文件（仅管理员）
+   */
+  @Get('weibo-preview/:fileId')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  @ApiBearerAuth()
+  @Throttle({ short: { limit: 50, ttl: 1000 }, long: { limit: 500, ttl: 60000 } })
+  @ApiOperation({ summary: '预览weibo文件（仅管理员）' })
+  @ApiResponse({ status: 200, description: '预览成功' })
+  @ApiResponse({ status: 401, description: '未授权' })
+  @ApiResponse({ status: 403, description: '需要管理员权限' })
+  async previewWeiboFile(
+    @Param('fileId') fileId: string,
+    @Req() req: Request,
+    @Res() res: Response
+  ) {
+    try {
+      const userId = (req.user as any).id;
+      const userRole = (req.user as any).role;
+      this.logger.log(`管理员 ${userId} (${userRole}) 预览weibo文件: ${fileId}`);
+
+      await this.uploadService.previewWeiboFile(fileId, userId, res);
+    } catch (error) {
+      this.logger.error('预览文件失败:', error);
+      res.status(404).json({ error: '文件预览失败' });
+    }
+  }
+
+  /**
+   * 批量上传weibo文件（仅管理员）
+   */
+  @Post('weibo-batch-upload')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '批量上传weibo文件（仅管理员）' })
+  @ApiResponse({ status: 200, description: '批量上传成功' })
+  @ApiResponse({ status: 401, description: '未授权' })
+  @ApiResponse({ status: 403, description: '需要管理员权限' })
+  async batchUploadWeiboFiles(@Body() body: { selectedFiles: string[] }, @Req() req: Request) {
+    try {
+      const userId = (req.user as any).id;
+      const userRole = (req.user as any).role;
+      this.logger.log(`管理员 ${userId} (${userRole}) 批量上传weibo文件: ${body.selectedFiles.length} 个文件`);
+      const result = await this.uploadService.batchUploadWeiboFiles(body.selectedFiles, userId);
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      this.logger.error('批量上传失败:', error);
+      throw new Error('批量上传失败');
+    }
   }
 }
