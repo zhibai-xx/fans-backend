@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Put, Param, UseGuards, Request } from '@nestjs/common';
+import { Controller, Post, Body, Get, Put, Param, UseGuards, Request, Req } from '@nestjs/common';
 import { UserService } from '../services/user.service';
 import { AuthService } from '../services/auth.service';
 import { RegisterDto } from '../dto/register.dto';
@@ -8,6 +8,7 @@ import { ChangePasswordDto } from '../dto/change-password.dto';
 import { UserResponseDto, PublicUserResponseDto } from '../dto/user-response.dto';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { LoginLogService } from '../../logs/services/login-log.service';
 
 @ApiTags('用户')
 @Controller('users')
@@ -15,24 +16,73 @@ export class UserController {
   constructor(
     private readonly userService: UserService,
     private readonly authService: AuthService,
+    private readonly loginLogService: LoginLogService,
   ) { }
 
   @Post('register')
   @ApiOperation({ summary: '用户注册' })
   @ApiResponse({ status: 201, description: '注册成功' })
   @ApiResponse({ status: 409, description: '用户名或邮箱已被注册' })
-  async register(@Body() registerDto: RegisterDto) {
-    const user = await this.userService.register(registerDto);
-    return this.authService.login(user);
+  async register(@Body() registerDto: RegisterDto, @Req() req: any) {
+    try {
+      const user = await this.userService.register(registerDto);
+      const result = await this.authService.login(user);
+
+      // 记录成功注册的登录日志
+      await this.loginLogService.logLoginAttempt({
+        user_id: user.id,
+        login_type: 'PASSWORD',
+        ip_address: this.loginLogService.extractIpAddress(req),
+        user_agent: this.loginLogService.extractUserAgent(req),
+        result: 'SUCCESS',
+      });
+
+      return result;
+    } catch (error) {
+      // 记录失败的注册尝试
+      await this.loginLogService.logLoginAttempt({
+        login_type: 'PASSWORD',
+        ip_address: this.loginLogService.extractIpAddress(req),
+        user_agent: this.loginLogService.extractUserAgent(req),
+        result: 'FAILED',
+        fail_reason: error.message,
+        username: registerDto.username,
+      });
+      throw error;
+    }
   }
 
   @Post('login')
   @ApiOperation({ summary: '用户登录' })
   @ApiResponse({ status: 200, description: '登录成功' })
   @ApiResponse({ status: 401, description: '用户名或密码错误' })
-  async login(@Body() loginDto: LoginDto) {
-    const user = await this.userService.login(loginDto);
-    return this.authService.login(user);
+  async login(@Body() loginDto: LoginDto, @Req() req: any) {
+    try {
+      const user = await this.userService.login(loginDto);
+      const result = await this.authService.login(user);
+
+      // 记录成功登录
+      await this.loginLogService.logLoginAttempt({
+        user_id: user.id,
+        login_type: 'PASSWORD',
+        ip_address: this.loginLogService.extractIpAddress(req),
+        user_agent: this.loginLogService.extractUserAgent(req),
+        result: 'SUCCESS',
+      });
+
+      return result;
+    } catch (error) {
+      // 记录失败的登录尝试
+      await this.loginLogService.logLoginAttempt({
+        login_type: 'PASSWORD',
+        ip_address: this.loginLogService.extractIpAddress(req),
+        user_agent: this.loginLogService.extractUserAgent(req),
+        result: 'FAILED',
+        fail_reason: error.message,
+        username: loginDto.username,
+      });
+      throw error;
+    }
   }
 
   @Get('profile')
