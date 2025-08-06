@@ -16,6 +16,7 @@ import {
     BatchOperationResultDto
 } from './dto/review.dto';
 import { MyLoggerService } from 'src/my-logger/my-logger.service';
+import { FileUtils } from 'src/upload/utils/file.utils';
 
 @Injectable()
 export class MediaService {
@@ -61,7 +62,7 @@ export class MediaService {
                 },
                 include: {
                     category: true,
-                    tags: {
+                    media_tags: {
                         include: {
                             tag: true
                         }
@@ -102,7 +103,7 @@ export class MediaService {
                 where: { id: media.id },
                 include: {
                     category: true,
-                    tags: {
+                    media_tags: {
                         include: {
                             tag: true
                         }
@@ -162,7 +163,7 @@ export class MediaService {
                         }
                     },
                     category: true,
-                    tags: {
+                    media_tags: {
                         include: {
                             tag: true
                         }
@@ -200,7 +201,7 @@ export class MediaService {
                     }
                 },
                 category: true,
-                tags: {
+                media_tags: {
                     include: {
                         tag: true
                     }
@@ -786,9 +787,6 @@ export class MediaService {
                 case MediaStatus.REJECTED:
                     stats.rejected = item._count;
                     break;
-                case MediaStatus.PRIVATE:
-                    stats.private = item._count;
-                    break;
             }
         });
 
@@ -843,7 +841,7 @@ export class MediaService {
         }
 
         if (tagId) {
-            where.tags = {
+            where.media_tags = {
                 some: {
                     tag_id: tagId
                 }
@@ -908,7 +906,7 @@ export class MediaService {
                         }
                     },
                     category: true,
-                    tags: {
+                    media_tags: {
                         include: {
                             tag: true
                         }
@@ -1178,7 +1176,7 @@ export class MediaService {
             const existingMedia = await this.databaseService.media.findUnique({
                 where: { id },
                 include: {
-                    tags: true
+                    media_tags: true
                 }
             });
 
@@ -1285,7 +1283,7 @@ export class MediaService {
                         }
                     },
                     category: true,
-                    tags: {
+                    media_tags: {
                         include: {
                             tag: true
                         }
@@ -1355,6 +1353,69 @@ export class MediaService {
         } catch (error) {
             this.logger.error(`获取用户上传统计失败: ${error.message}`, error.stack);
             throw new UnprocessableEntityException(`获取上传统计失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 获取所有用户上传统计
+     * @returns 全局用户上传统计
+     */
+    async getAllUserUploadStats(): Promise<{
+        totalUploads: number;
+        totalUsers: number;
+        averageUploadsPerUser: number;
+        topUsers: Array<{
+            id: number;
+            username: string;
+            uploadCount: number;
+            storageUsed: string;
+        }>;
+    }> {
+        try {
+            // 获取总上传数和用户数
+            const [totalMedia, totalUsers] = await Promise.all([
+                this.databaseService.media.count(),
+                this.databaseService.user.count(),
+            ]);
+
+            // 获取前10名用户的上传统计
+            const topUsersRaw = await this.databaseService.$queryRaw<Array<{
+                user_id: bigint;
+                username: string;
+                upload_count: bigint;
+                total_size: bigint;
+            }>>`
+              SELECT 
+                u.id as user_id,
+                u.username,
+                COUNT(m.id) as upload_count,
+                COALESCE(SUM(m.file_size), 0) as total_size
+              FROM "User" u
+              LEFT JOIN "Media" m ON u.id = m.user_id
+              GROUP BY u.id, u.username
+              HAVING COUNT(m.id) > 0
+              ORDER BY upload_count DESC
+              LIMIT 10
+            `;
+
+            const topUsers = topUsersRaw.map(user => ({
+                id: Number(user.user_id),
+                username: user.username,
+                uploadCount: Number(user.upload_count),
+                storageUsed: FileUtils.formatFileSize(Number(user.total_size)),
+            }));
+
+            const averageUploadsPerUser = totalUsers > 0 ? totalMedia / totalUsers : 0;
+
+            return {
+                totalUploads: totalMedia,
+                totalUsers,
+                averageUploadsPerUser: Math.round(averageUploadsPerUser * 100) / 100,
+                topUsers,
+            };
+        } catch (error) {
+            this.logger.error(`获取用户上传统计失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`获取用户上传统计失败: ${error.message}`);
         }
     }
 
@@ -1461,7 +1522,7 @@ export class MediaService {
                                 name: true
                             }
                         },
-                        tags: {
+                        media_tags: {
                             include: {
                                 tag: {
                                     select: {
@@ -1685,6 +1746,1126 @@ export class MediaService {
             }
 
             throw new UnprocessableEntityException(`重新提交失败: ${error.message}`);
+        }
+    }
+
+    // =====================================
+    // 管理员专用标签和分类方法
+    // =====================================
+
+    /**
+     * 获取所有标签（包含统计信息，管理员专用）
+     * @param search 搜索关键词
+     * @returns 标签列表
+     */
+    async getAllTagsWithStats(search?: string) {
+        try {
+            const where = search ? {
+                name: {
+                    contains: search,
+                    mode: 'insensitive' as const
+                }
+            } : {};
+
+            const tags = await this.databaseService.tag.findMany({
+                where,
+                orderBy: { created_at: 'desc' },
+                include: {
+                    _count: {
+                        select: {
+                            media_tags: true
+                        }
+                    }
+                }
+            });
+
+            return tags;
+        } catch (error) {
+            this.logger.error(`获取标签统计失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`获取标签统计失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 获取所有分类（包含统计信息，管理员专用）
+     * @param search 搜索关键词
+     * @returns 分类列表
+     */
+    async getAllCategoriesWithStats(search?: string) {
+        try {
+            const where = search ? {
+                OR: [
+                    {
+                        name: {
+                            contains: search,
+                            mode: 'insensitive' as const
+                        }
+                    },
+                    {
+                        description: {
+                            contains: search,
+                            mode: 'insensitive' as const
+                        }
+                    }
+                ]
+            } : {};
+
+            const categories = await this.databaseService.category.findMany({
+                where,
+                orderBy: { created_at: 'desc' },
+                include: {
+                    _count: {
+                        select: {
+                            media: true
+                        }
+                    }
+                }
+            });
+
+            return categories;
+        } catch (error) {
+            this.logger.error(`获取分类统计失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`获取分类统计失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 更新标签（管理员专用）
+     * @param id 标签ID
+     * @param updateTagDto 更新数据
+     * @returns 更新后的标签
+     */
+    async updateTag(id: string, updateTagDto: { name: string }) {
+        try {
+            // 检查标签是否存在
+            const existingTag = await this.databaseService.tag.findUnique({
+                where: { id }
+            });
+
+            if (!existingTag) {
+                throw new NotFoundException('标签不存在');
+            }
+
+            // 检查名称是否与其他标签冲突
+            if (updateTagDto.name !== existingTag.name) {
+                const duplicateTag = await this.databaseService.tag.findUnique({
+                    where: { name: updateTagDto.name }
+                });
+
+                if (duplicateTag) {
+                    throw new BadRequestException('标签名称已存在');
+                }
+            }
+
+            // 更新标签
+            const updatedTag = await this.databaseService.tag.update({
+                where: { id },
+                data: { name: updateTagDto.name }
+            });
+
+            this.logger.log(`更新标签: ${id} -> ${updateTagDto.name}`, MediaService.name);
+            return updatedTag;
+        } catch (error) {
+            this.logger.error(`更新标签失败: ${error.message}`, error.stack);
+            if (error instanceof NotFoundException || error instanceof BadRequestException) {
+                throw error;
+            }
+            throw new UnprocessableEntityException(`更新标签失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 批量删除标签（管理员专用）
+     * @param ids 标签ID数组
+     */
+    async batchDeleteTags(ids: string[]) {
+        try {
+            // 使用事务确保操作一致性
+            await this.databaseService.$transaction(async (prisma) => {
+                // 先删除关联的MediaTag记录
+                await prisma.mediaTag.deleteMany({
+                    where: {
+                        tag_id: { in: ids }
+                    }
+                });
+
+                // 再删除标签
+                await prisma.tag.deleteMany({
+                    where: {
+                        id: { in: ids }
+                    }
+                });
+            });
+
+            this.logger.log(`批量删除标签: ${ids.join(', ')}`, MediaService.name);
+        } catch (error) {
+            this.logger.error(`批量删除标签失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`批量删除标签失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 批量删除分类（管理员专用）
+     * @param ids 分类ID数组
+     */
+    async batchDeleteCategories(ids: string[]) {
+        try {
+            // 使用事务确保操作一致性
+            await this.databaseService.$transaction(async (prisma) => {
+                // 先解除媒体的分类关联
+                await prisma.media.updateMany({
+                    where: {
+                        category_id: { in: ids }
+                    },
+                    data: {
+                        category_id: null
+                    }
+                });
+
+                // 再删除分类
+                await prisma.category.deleteMany({
+                    where: {
+                        id: { in: ids }
+                    }
+                });
+            });
+
+            this.logger.log(`批量删除分类: ${ids.join(', ')}`, MediaService.name);
+        } catch (error) {
+            this.logger.error(`批量删除分类失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`批量删除分类失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 获取标签和分类统计信息（管理员专用）
+     * @returns 统计信息
+     */
+    async getTagsCategoriesStats() {
+        try {
+            const [tagCount, categoryCount, tagUsageStats, categoryUsageStats] = await Promise.all([
+                // 标签总数
+                this.databaseService.tag.count(),
+
+                // 分类总数
+                this.databaseService.category.count(),
+
+                // 标签使用统计
+                this.databaseService.tag.findMany({
+                    include: {
+                        _count: {
+                            select: {
+                                media_tags: true
+                            }
+                        }
+                    },
+                    orderBy: {
+                        media_tags: {
+                            _count: 'desc'
+                        }
+                    },
+                    take: 10
+                }),
+
+                // 分类使用统计
+                this.databaseService.category.findMany({
+                    include: {
+                        _count: {
+                            select: {
+                                media: true
+                            }
+                        }
+                    },
+                    orderBy: {
+                        media: {
+                            _count: 'desc'
+                        }
+                    },
+                    take: 10
+                })
+            ]);
+
+            return {
+                overview: {
+                    total_tags: tagCount,
+                    total_categories: categoryCount,
+                    unused_tags: tagUsageStats.filter(tag => (tag as any)._count.media_tags === 0).length,
+                    unused_categories: categoryUsageStats.filter(cat => cat._count.media === 0).length
+                },
+                top_tags: tagUsageStats.map(tag => ({
+                    id: tag.id,
+                    name: tag.name,
+                    usage_count: (tag as any)._count.media_tags
+                })),
+                top_categories: categoryUsageStats.map(cat => ({
+                    id: cat.id,
+                    name: cat.name,
+                    description: cat.description,
+                    usage_count: cat._count.media
+                }))
+            };
+        } catch (error) {
+            this.logger.error(`获取统计信息失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`获取统计信息失败: ${error.message}`);
+        }
+    }
+
+    // =====================================
+    // 管理员专用媒体管理方法
+    // =====================================
+
+    // 重复函数1已删除
+
+    /**
+     * 获取媒体统计信息（管理员专用）
+     * @returns 统计信息
+     */
+    async getMediaStats() {
+        try {
+            const [
+                totalCount,
+                pendingCount,
+                approvedCount,
+                rejectedCount,
+                visibleCount,
+                hiddenCount,
+                imageCount,
+                videoCount,
+                todayCount,
+                weekCount
+            ] = await Promise.all([
+                this.databaseService.media.count(),
+                this.databaseService.media.count({ where: { status: 'PENDING' } }),
+                this.databaseService.media.count({ where: { status: 'APPROVED' } }),
+                this.databaseService.media.count({ where: { status: 'REJECTED' } }),
+                this.databaseService.media.count({ where: { visibility: 'VISIBLE' } }),
+                this.databaseService.media.count({ where: { visibility: 'HIDDEN' } }),
+                this.databaseService.media.count({ where: { media_type: 'IMAGE' } }),
+                this.databaseService.media.count({ where: { media_type: 'VIDEO' } }),
+                this.databaseService.media.count({
+                    where: {
+                        created_at: {
+                            gte: new Date(new Date().setHours(0, 0, 0, 0))
+                        }
+                    }
+                }),
+                this.databaseService.media.count({
+                    where: {
+                        created_at: {
+                            gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+                        }
+                    }
+                })
+            ]);
+
+            return {
+                overview: {
+                    total: totalCount,
+                    pending: pendingCount,
+                    approved: approvedCount,
+                    rejected: rejectedCount,
+                    visible: visibleCount,
+                    hidden: hiddenCount
+                },
+                byType: {
+                    image: imageCount,
+                    video: videoCount
+                },
+                recentActivity: {
+                    today: todayCount,
+                    thisWeek: weekCount
+                }
+            };
+        } catch (error) {
+            this.logger.error(`获取媒体统计失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`获取媒体统计失败: ${error.message}`);
+        }
+    }
+
+    // 重复函数2已删除
+
+    /**
+     * 更新媒体状态（管理员专用）
+     * @param id 媒体ID
+     * @param status 新状态
+     * @param reviewComment 审核备注
+     * @returns 更新后的媒体
+     */
+    async updateMediaStatusByAdmin(id: string, status: any, reviewComment?: string) {
+        try {
+            const media = await this.databaseService.media.findUnique({
+                where: { id }
+            });
+
+            if (!media) {
+                throw new NotFoundException('媒体不存在');
+            }
+
+            const updatedMedia = await this.databaseService.media.update({
+                where: { id },
+                data: {
+                    status,
+                    review_comment: reviewComment,
+                    reviewed_at: new Date(),
+                    updated_at: new Date()
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            avatar_url: true
+                        }
+                    },
+                    category: true,
+                    media_tags: {
+                        include: {
+                            tag: true
+                        }
+                    }
+                }
+            });
+
+            this.logger.log(`管理员更新媒体 ${id} 状态为 ${status}`, MediaService.name);
+            return updatedMedia;
+        } catch (error) {
+            this.logger.error(`更新媒体状态失败: ${error.message}`, error.stack);
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new UnprocessableEntityException(`更新媒体状态失败: ${error.message}`);
+        }
+    }
+
+    // 重复函数3和4已删除
+
+    /**
+     * 删除单个媒体（管理员专用）
+     * @param id 媒体ID
+     */
+    async deleteMediaByAdmin(id: string) {
+        try {
+            const media = await this.databaseService.media.findUnique({
+                where: { id }
+            });
+
+            if (!media) {
+                throw new NotFoundException('媒体不存在');
+            }
+
+            // 使用事务删除相关数据
+            await this.databaseService.$transaction(async (prisma) => {
+                // 删除关联的标签
+                await prisma.mediaTag.deleteMany({
+                    where: { media_id: id }
+                });
+
+                // 删除关联的评论
+                await prisma.comment.deleteMany({
+                    where: { media_id: id }
+                });
+
+                // 删除关联的收藏
+                await prisma.favorite.deleteMany({
+                    where: { media_id: id }
+                });
+
+                // 删除媒体记录
+                await prisma.media.delete({
+                    where: { id }
+                });
+            });
+
+            this.logger.log(`管理员删除媒体 ${id}`, MediaService.name);
+        } catch (error) {
+            this.logger.error(`删除媒体失败: ${error.message}`, error.stack);
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new UnprocessableEntityException(`删除媒体失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 更新媒体信息（管理员专用）
+     * @param id 媒体ID
+     * @param updateData 更新数据
+     * @returns 更新后的媒体
+     */
+    async updateMediaInfoByAdmin(id: string, updateData: any) {
+        try {
+            const media = await this.databaseService.media.findUnique({
+                where: { id }
+            });
+
+            if (!media) {
+                throw new NotFoundException('媒体不存在');
+            }
+
+            // 使用事务更新媒体信息
+            const updatedMedia = await this.databaseService.$transaction(async (prisma) => {
+                // 更新基本信息
+                const updated = await prisma.media.update({
+                    where: { id },
+                    data: {
+                        title: updateData.title,
+                        description: updateData.description,
+                        category_id: updateData.category_id,
+                        updated_at: new Date()
+                    }
+                });
+
+                // 更新标签关联
+                if (updateData.tag_ids !== undefined) {
+                    // 删除现有标签关联
+                    await prisma.mediaTag.deleteMany({
+                        where: { media_id: id }
+                    });
+
+                    // 创建新的标签关联
+                    if (updateData.tag_ids.length > 0) {
+                        await prisma.mediaTag.createMany({
+                            data: updateData.tag_ids.map((tagId: string) => ({
+                                media_id: id,
+                                tag_id: tagId
+                            }))
+                        });
+                    }
+                }
+
+                return updated;
+            });
+
+            // 获取完整的媒体信息返回
+            const fullMedia = await this.databaseService.media.findUnique({
+                where: { id },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            avatar_url: true
+                        }
+                    },
+                    category: true,
+                    media_tags: {
+                        include: {
+                            tag: true
+                        }
+                    }
+                }
+            });
+
+            this.logger.log(`管理员更新媒体 ${id} 信息`, MediaService.name);
+            return fullMedia;
+        } catch (error) {
+            this.logger.error(`更新媒体信息失败: ${error.message}`, error.stack);
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new UnprocessableEntityException(`更新媒体信息失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 获取分类使用统计（管理员专用）
+     * @returns 分类使用统计
+     */
+    async getCategoryUsageStats() {
+        try {
+            const categories = await this.databaseService.category.findMany({
+                include: {
+                    _count: {
+                        select: {
+                            media: true
+                        }
+                    }
+                },
+                orderBy: {
+                    media: {
+                        _count: 'desc'
+                    }
+                }
+            });
+
+            return categories.map(category => ({
+                id: category.id,
+                name: category.name,
+                description: category.description,
+                usage_count: category._count.media,
+                created_at: category.created_at
+            }));
+        } catch (error) {
+            this.logger.error(`获取分类使用统计失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`获取分类使用统计失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 获取标签使用统计（管理员专用）
+     * @returns 标签使用统计
+     */
+    async getTagUsageStats() {
+        try {
+            const tags = await this.databaseService.tag.findMany({
+                include: {
+                    _count: {
+                        select: {
+                            media_tags: true
+                        }
+                    }
+                },
+                orderBy: {
+                    media_tags: {
+                        _count: 'desc'
+                    }
+                }
+            });
+
+            return tags.map(tag => ({
+                id: tag.id,
+                name: tag.name,
+                usage_count: (tag as any)._count.media_tags,
+                created_at: tag.created_at
+            }));
+        } catch (error) {
+            this.logger.error(`获取标签使用统计失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`获取标签使用统计失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 获取所有媒体内容（管理员专用）
+     */
+    async getAllMediaForAdmin(filters: any, page: number, limit: number) {
+        try {
+            const skip = (page - 1) * limit;
+            const where: any = {};
+
+            // 构建查询条件
+            if (filters.status) {
+                where.status = filters.status;
+            }
+            if (filters.visibility) {
+                where.visibility = filters.visibility;
+            }
+            if (filters.media_type) {
+                where.media_type = filters.media_type;
+            }
+            if (filters.category_id) {
+                where.category_id = filters.category_id;
+            }
+            if (filters.user_id) {
+                where.user_id = filters.user_id;
+            }
+            if (filters.search) {
+                where.OR = [
+                    { title: { contains: filters.search, mode: 'insensitive' } },
+                    { description: { contains: filters.search, mode: 'insensitive' } },
+                    { user: { username: { contains: filters.search, mode: 'insensitive' } } }
+                ];
+            }
+
+            // 日期范围筛选
+            if (filters.date_range) {
+                const now = new Date();
+                let startDate: Date | null = null;
+
+                switch (filters.date_range) {
+                    case 'today':
+                        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                        break;
+                    case 'week':
+                        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                        break;
+                    case 'month':
+                        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                        break;
+                    default:
+                        startDate = null;
+                }
+
+                if (startDate) {
+                    where.created_at = {
+                        gte: startDate
+                    };
+                }
+            }
+
+            // 查询数据
+            const [media, total] = await Promise.all([
+                this.databaseService.media.findMany({
+                    where,
+                    skip,
+                    take: limit,
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true,
+                                avatar_url: true
+                            }
+                        },
+                        category: {
+                            select: {
+                                id: true,
+                                name: true
+                            }
+                        },
+                        media_tags: {
+                            include: {
+                                tag: {
+                                    select: {
+                                        id: true,
+                                        name: true
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    orderBy: {
+                        created_at: 'desc'
+                    }
+                }),
+                this.databaseService.media.count({ where })
+            ]);
+
+            return {
+                data: media,
+                total
+            };
+        } catch (error) {
+            this.logger.error(`获取管理员媒体列表失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`获取管理员媒体列表失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 获取媒体统计信息（管理员专用）
+     */
+    async getMediaStatsForAdmin() {
+        try {
+            const [statusStats, visibilityStats, typeStats, recentStats] = await Promise.all([
+                // 按审核状态统计
+                this.databaseService.media.groupBy({
+                    by: ['status'],
+                    _count: true
+                }),
+                // 按可见状态统计
+                this.databaseService.media.groupBy({
+                    by: ['visibility'],
+                    _count: true
+                }),
+                // 按类型统计
+                this.databaseService.media.groupBy({
+                    by: ['media_type'],
+                    _count: true
+                }),
+                // 最近活动统计
+                Promise.all([
+                    this.databaseService.media.count({
+                        where: {
+                            created_at: {
+                                gte: new Date(new Date().setHours(0, 0, 0, 0))
+                            }
+                        }
+                    }),
+                    this.databaseService.media.count({
+                        where: {
+                            created_at: {
+                                gte: new Date(new Date().getTime() - 7 * 24 * 60 * 60 * 1000)
+                            }
+                        }
+                    })
+                ])
+            ]);
+
+            // 处理审核状态统计
+            const reviewStats = {
+                pending: 0,
+                approved: 0,
+                rejected: 0
+            };
+
+            statusStats.forEach(stat => {
+                reviewStats[stat.status.toLowerCase()] = stat._count;
+            });
+
+            // 处理可见状态统计
+            const visibilityStatsObj = {
+                visible: 0,
+                hidden: 0
+            };
+
+            visibilityStats.forEach(stat => {
+                visibilityStatsObj[stat.visibility.toLowerCase()] = stat._count;
+            });
+
+            // 总体统计
+            const overview = {
+                total: reviewStats.pending + reviewStats.approved + reviewStats.rejected,
+                ...reviewStats,
+                ...visibilityStatsObj
+            };
+
+            // 处理类型统计
+            const byType = {
+                image: 0,
+                video: 0
+            };
+
+            typeStats.forEach(stat => {
+                byType[stat.media_type.toLowerCase()] = stat._count;
+            });
+
+            // 最近活动统计
+            const recentActivity = {
+                today: recentStats[0],
+                thisWeek: recentStats[1]
+            };
+
+            return {
+                overview,
+                byType,
+                recentActivity
+            };
+        } catch (error) {
+            this.logger.error(`获取媒体统计失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`获取媒体统计失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 批量更新媒体状态（管理员专用）
+     */
+    async batchUpdateMediaStatus(mediaIds: string[], status: string, reviewComment?: string, adminId?: number) {
+        try {
+            const results = await Promise.allSettled(
+                mediaIds.map(id =>
+                    this.databaseService.media.update({
+                        where: { id },
+                        data: {
+                            status: status as any,
+                            review_comment: reviewComment,
+                            reviewed_by: adminId,
+                            reviewed_at: new Date()
+                        }
+                    })
+                )
+            );
+
+            const successCount = results.filter(r => r.status === 'fulfilled').length;
+            const failedCount = results.filter(r => r.status === 'rejected').length;
+
+            this.logger.log(`批量更新媒体状态完成: 成功${successCount}个, 失败${failedCount}个`);
+
+            return {
+                successCount,
+                failedCount
+            };
+        } catch (error) {
+            this.logger.error(`批量更新媒体状态失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`批量更新媒体状态失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 批量删除媒体（管理员专用）
+     */
+    async batchDeleteMedia(mediaIds: string[], adminId?: number) {
+        try {
+            const results = await Promise.allSettled(
+                mediaIds.map(async (id) => {
+                    // 使用事务确保数据一致性
+                    return await this.databaseService.$transaction(async (prisma) => {
+                        // 首先删除关联的标签关系
+                        await prisma.mediaTag.deleteMany({
+                            where: { media_id: id }
+                        });
+
+                        // 删除收藏关系
+                        await prisma.favorite.deleteMany({
+                            where: { media_id: id }
+                        });
+
+                        // 删除评论
+                        await prisma.comment.deleteMany({
+                            where: { media_id: id }
+                        });
+
+                        // 最后删除媒体本身
+                        return await prisma.media.delete({
+                            where: { id }
+                        });
+                    });
+                })
+            );
+
+            const successCount = results.filter(r => r.status === 'fulfilled').length;
+            const failedCount = results.filter(r => r.status === 'rejected').length;
+
+            // 记录失败的详细信息
+            const failedResults = results.filter(r => r.status === 'rejected') as PromiseRejectedResult[];
+            if (failedCount > 0) {
+                failedResults.forEach((result, index) => {
+                    this.logger.warn(`删除媒体 ${mediaIds[results.indexOf(result)]} 失败: ${result.reason?.message}`);
+                });
+            }
+
+            this.logger.log(`批量删除媒体完成: 成功${successCount}个, 失败${failedCount}个`);
+
+            return {
+                successCount,
+                failedCount,
+                failedDetails: failedResults.map((result, index) => ({
+                    mediaId: mediaIds[results.indexOf(result)],
+                    error: result.reason?.message || '未知错误'
+                }))
+            };
+        } catch (error) {
+            this.logger.error(`批量删除媒体失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`批量删除媒体失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 单个媒体显示状态更新（管理员专用）
+     */
+    async updateMediaVisibilityForAdmin(id: string, visibility: 'VISIBLE' | 'HIDDEN', adminId?: number) {
+        try {
+            const media = await this.databaseService.media.update({
+                where: { id },
+                data: {
+                    visibility: visibility
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            avatar_url: true
+                        }
+                    },
+                    category: {
+                        select: {
+                            id: true,
+                            name: true
+                        }
+                    },
+                    media_tags: {
+                        include: {
+                            tag: {
+                                select: {
+                                    id: true,
+                                    name: true
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            this.logger.log(`管理员 ${adminId} 更新媒体可见状态: ${id} -> ${visibility}`);
+            return media;
+        } catch (error) {
+            this.logger.error(`更新媒体可见状态失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`更新媒体可见状态失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 批量更新媒体显示状态（管理员专用）
+     */
+    async batchUpdateMediaVisibility(mediaIds: string[], visibility: 'VISIBLE' | 'HIDDEN', adminId?: number) {
+        try {
+            const result = await this.databaseService.media.updateMany({
+                where: {
+                    id: {
+                        in: mediaIds
+                    }
+                },
+                data: {
+                    visibility: visibility
+                }
+            });
+
+            this.logger.log(`管理员 ${adminId} 批量更新媒体可见状态: ${mediaIds.length} 个媒体 -> ${visibility}`);
+            return {
+                count: result.count,
+                mediaIds,
+                visibility
+            };
+        } catch (error) {
+            this.logger.error(`批量更新媒体可见状态失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`批量更新媒体可见状态失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 获取媒体详情（管理员专用）
+     */
+    async getMediaDetailForAdmin(id: string) {
+        try {
+            const media = await this.databaseService.media.findUnique({
+                where: { id },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true,
+                            avatar_url: true,
+                            created_at: true
+                        }
+                    },
+                    category: {
+                        select: {
+                            id: true,
+                            name: true,
+                            description: true
+                        }
+                    },
+                    media_tags: {
+                        include: {
+                            tag: {
+                                select: {
+                                    id: true,
+                                    name: true
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            if (!media) {
+                throw new NotFoundException('媒体不存在');
+            }
+
+            return media;
+        } catch (error) {
+            this.logger.error(`获取媒体详情失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`获取媒体详情失败: ${error.message}`);
+        }
+    }
+
+    /**
+     * 管理员更新媒体信息
+     */
+    async updateMediaInfoForAdmin(
+        id: string,
+        updateData: {
+            title?: string;
+            description?: string;
+            category_id?: string;
+            tag_ids?: string[];
+        }
+    ) {
+        try {
+            this.logger.log(`管理员更新媒体信息: ${id}`);
+
+            // 验证媒体是否存在
+            const existingMedia = await this.databaseService.media.findUnique({
+                where: { id },
+                select: { id: true, title: true }
+            });
+
+            if (!existingMedia) {
+                throw new NotFoundException('媒体不存在');
+            }
+
+            // 如果指定了分类，验证分类是否存在
+            if (updateData.category_id) {
+                const category = await this.databaseService.category.findUnique({
+                    where: { id: updateData.category_id }
+                });
+                if (!category) {
+                    throw new NotFoundException('指定的分类不存在');
+                }
+            }
+
+            // 如果指定了标签，验证标签是否存在
+            if (updateData.tag_ids && updateData.tag_ids.length > 0) {
+                const existingTags = await this.databaseService.tag.findMany({
+                    where: { id: { in: updateData.tag_ids } },
+                    select: { id: true }
+                });
+
+                if (existingTags.length !== updateData.tag_ids.length) {
+                    throw new NotFoundException('部分指定的标签不存在');
+                }
+            }
+
+            // 开始事务更新
+            const result = await this.databaseService.$transaction(async (prisma) => {
+                // 更新基本信息
+                const updatedMedia = await prisma.media.update({
+                    where: { id },
+                    data: {
+                        title: updateData.title,
+                        description: updateData.description,
+                        category_id: updateData.category_id,
+                        updated_at: new Date()
+                    }
+                });
+
+                // 如果指定了标签，更新标签关联
+                if (updateData.tag_ids !== undefined) {
+                    // 删除现有的标签关联
+                    await prisma.mediaTag.deleteMany({
+                        where: { media_id: id }
+                    });
+
+                    // 添加新的标签关联
+                    if (updateData.tag_ids.length > 0) {
+                        const tagRelations = updateData.tag_ids.map(tagId => ({
+                            media_id: id,
+                            tag_id: tagId
+                        }));
+
+                        await prisma.mediaTag.createMany({
+                            data: tagRelations
+                        });
+                    }
+                }
+
+                // 返回更新后的媒体信息（包含关联数据）
+                return await prisma.media.findUnique({
+                    where: { id },
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true,
+                                avatar_url: true
+                            }
+                        },
+                        category: {
+                            select: {
+                                id: true,
+                                name: true
+                            }
+                        },
+                        media_tags: {
+                            include: {
+                                tag: {
+                                    select: {
+                                        id: true,
+                                        name: true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            });
+
+            this.logger.log(`媒体信息更新成功: ${id}`);
+            return result;
+
+        } catch (error) {
+            this.logger.error(`管理员更新媒体信息失败: ${error.message}`, error.stack);
+            throw new UnprocessableEntityException(`更新媒体信息失败: ${error.message}`);
         }
     }
 }
