@@ -4,91 +4,87 @@ const bcrypt = require('bcrypt');
 const prisma = new PrismaClient();
 
 async function createTestUsers() {
-  console.log('🚀 开始创建/更新测试用户...\n');
-
   try {
-    // 处理普通用户
-    const existingNormalUser = await prisma.user.findUnique({
-      where: { username: 'testuser' }
-    });
+    console.log('🔧 开始创建测试用户数据...');
 
-    if (existingNormalUser) {
-      // 更新现有用户为普通用户角色
-      const updatedNormalUser = await prisma.user.update({
-        where: { username: 'testuser' },
-        data: { role: 'USER' }
-      });
-      console.log(`✅ 更新现有用户: ${updatedNormalUser.username} -> ${updatedNormalUser.role}`);
-    } else {
-      // 创建新的普通用户
-      const normalUserPassword = await bcrypt.hash('testpass123', 10);
-      const normalUser = await prisma.user.create({
-        data: {
-          username: 'testuser',
-          email: 'testuser@example.com',
-          password: normalUserPassword,
-          nickname: '测试用户',
-          role: 'USER'
-        }
-      });
-      console.log(`✅ 创建普通用户: ${normalUser.username} (${normalUser.role})`);
-    }
-
-    // 处理管理员用户
-    const existingAdminUser = await prisma.user.findUnique({
-      where: { username: 'admin' }
-    });
-
-    if (existingAdminUser) {
-      // 更新现有用户为管理员角色
-      const updatedAdminUser = await prisma.user.update({
-        where: { username: 'admin' },
-        data: { role: 'ADMIN' }
-      });
-      console.log(`✅ 更新现有用户: ${updatedAdminUser.username} -> ${updatedAdminUser.role}`);
-    } else {
-      // 创建新的管理员用户
-      const adminPassword = await bcrypt.hash('admin123', 10);
-      const adminUser = await prisma.user.create({
-        data: {
-          username: 'admin',
-          email: 'admin@example.com',
-          password: adminPassword,
-          nickname: '管理员',
-          role: 'ADMIN'
-        }
-      });
-      console.log(`✅ 创建管理员用户: ${adminUser.username} (${adminUser.role})`);
-    }
-
-    // 验证用户角色
-    console.log('\n📋 用户验证:');
-    const users = await prisma.user.findMany({
+    // 检查是否已有测试用户
+    const existingUsers = await prisma.user.findMany({
       where: {
         username: {
-          in: ['testuser', 'admin']
+          in: ['test_user1', 'test_user2', 'test_user3', 'suspended_user']
         }
-      },
-      select: {
-        id: true,
-        username: true,
-        email: true,
-        role: true,
-        created_at: true
       }
     });
 
-    users.forEach(user => {
-      console.log(`   ${user.username}: ${user.role} (ID: ${user.id})`);
-    });
+    if (existingUsers.length > 0) {
+      console.log('⚠️  测试用户已存在，跳过创建');
+      return;
+    }
 
-    console.log('\n🎉 测试用户处理完成！');
+    // 创建测试用户数据
+    const testUsers = [
+      {
+        username: 'test_user1',
+        email: 'user1@test.com',
+        password: await bcrypt.hash('123456', 10),
+        nickname: '测试用户1',
+        role: 'USER',
+        status: 'ACTIVE',
+        phoneNumber: '13800138001',
+        created_at: new Date('2024-01-10T08:00:00Z'),
+      },
+      {
+        username: 'test_user2',
+        email: 'user2@test.com',
+        password: await bcrypt.hash('123456', 10),
+        nickname: '测试用户2',
+        role: 'USER',
+        status: 'ACTIVE',
+        phoneNumber: '13800138002',
+        created_at: new Date('2024-01-15T10:30:00Z'),
+      },
+      {
+        username: 'test_user3',
+        email: 'user3@test.com',
+        password: await bcrypt.hash('123456', 10),
+        nickname: '测试用户3',
+        role: 'USER',
+        status: 'ACTIVE',
+        phoneNumber: null,
+        created_at: new Date('2024-01-20T14:15:00Z'),
+      },
+      {
+        username: 'suspended_user',
+        email: 'suspended@test.com',
+        password: await bcrypt.hash('123456', 10),
+        nickname: '暂停用户',
+        role: 'USER',
+        status: 'SUSPENDED',
+        phoneNumber: '13800138003',
+        created_at: new Date('2024-01-05T16:20:00Z'),
+      }
+    ];
+
+    // 批量创建用户
+    for (const userData of testUsers) {
+      await prisma.user.create({
+        data: userData
+      });
+      console.log(`✅ 创建用户: ${userData.username} (${userData.nickname})`);
+    }
+
+    console.log('🎉 测试用户创建完成！');
+    console.log('📊 创建的用户列表:');
+    console.log('  - test_user1 (测试用户1) - ACTIVE');
+    console.log('  - test_user2 (测试用户2) - ACTIVE');
+    console.log('  - test_user3 (测试用户3) - ACTIVE');
+    console.log('  - suspended_user (暂停用户) - SUSPENDED');
 
   } catch (error) {
-    console.error('❌ 处理测试用户失败:', error);
+    console.error('❌ 创建测试用户失败:', error);
   } finally {
     await prisma.$disconnect();
   }
 }
 
-createTestUsers(); 
+createTestUsers();

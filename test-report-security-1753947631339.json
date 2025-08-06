@@ -1,0 +1,154 @@
+{
+  "summary": {
+    "total": 17,
+    "passed": 17,
+    "failed": 0,
+    "success_rate": "100.0%"
+  },
+  "test_results": [
+    {
+      "test": "用户创建",
+      "status": "PASS",
+      "message": "测试用户创建成功",
+      "details": {
+        "admin": 7,
+        "user": 8,
+        "suspended": 9
+      },
+      "timestamp": "2025-07-31T07:40:31.307Z"
+    },
+    {
+      "test": "角色定义",
+      "status": "PASS",
+      "message": "用户角色和状态枚举正确定义",
+      "details": {
+        "roles": [
+          "USER",
+          "ADMIN"
+        ],
+        "statuses": [
+          "ACTIVE",
+          "SUSPENDED"
+        ]
+      },
+      "timestamp": "2025-07-31T07:40:31.308Z"
+    },
+    {
+      "test": "管理员检查",
+      "status": "PASS",
+      "message": "系统中有 5 个活跃管理员",
+      "details": {
+        "adminCount": 5
+      },
+      "timestamp": "2025-07-31T07:40:31.312Z"
+    },
+    {
+      "test": "操作记录表",
+      "status": "PASS",
+      "message": "操作记录表结构正确",
+      "details": null,
+      "timestamp": "2025-07-31T07:40:31.314Z"
+    },
+    {
+      "test": "登录记录表",
+      "status": "PASS",
+      "message": "登录记录表结构正确",
+      "details": null,
+      "timestamp": "2025-07-31T07:40:31.315Z"
+    },
+    {
+      "test": "用户数据访问",
+      "status": "PASS",
+      "message": "普通用户只能访问自己的非敏感数据",
+      "details": null,
+      "timestamp": "2025-07-31T07:40:31.317Z"
+    },
+    {
+      "test": "管理员数据访问",
+      "status": "PASS",
+      "message": "管理员可以查看所有 9 个用户的信息",
+      "details": null,
+      "timestamp": "2025-07-31T07:40:31.317Z"
+    },
+    {
+      "test": "用户状态控制",
+      "status": "PASS",
+      "message": "被暂停用户状态正确设置",
+      "details": null,
+      "timestamp": "2025-07-31T07:40:31.319Z"
+    },
+    {
+      "test": "操作记录创建",
+      "status": "PASS",
+      "message": "操作记录成功创建并保存",
+      "details": {
+        "logId": "c8a27e94-d93f-439e-a0ac-dc86271b7989"
+      },
+      "timestamp": "2025-07-31T07:40:31.321Z"
+    },
+    {
+      "test": "登录记录创建",
+      "status": "PASS",
+      "message": "登录记录成功创建并保存",
+      "details": {
+        "logId": "a4fc429f-5fec-4f23-a213-a7ad3bd91d08"
+      },
+      "timestamp": "2025-07-31T07:40:31.324Z"
+    },
+    {
+      "test": "操作记录查询",
+      "status": "PASS",
+      "message": "成功查询到 1 条操作记录",
+      "details": null,
+      "timestamp": "2025-07-31T07:40:31.327Z"
+    },
+    {
+      "test": "SQL注入防护",
+      "status": "PASS",
+      "message": "Prisma成功防护SQL注入攻击",
+      "details": null,
+      "timestamp": "2025-07-31T07:40:31.329Z"
+    },
+    {
+      "test": "敏感数据保护",
+      "status": "PASS",
+      "message": "敏感数据（密码）未在查询结果中暴露",
+      "details": null,
+      "timestamp": "2025-07-31T07:40:31.330Z"
+    },
+    {
+      "test": "批量操作权限",
+      "status": "PASS",
+      "message": "批量操作需要适当的权限检查",
+      "details": null,
+      "timestamp": "2025-07-31T07:40:31.330Z"
+    },
+    {
+      "test": "外键约束",
+      "status": "PASS",
+      "message": "外键约束确保数据引用完整性",
+      "details": null,
+      "timestamp": "2025-07-31T07:40:31.332Z"
+    },
+    {
+      "test": "唯一约束",
+      "status": "PASS",
+      "message": "邮箱唯一约束正常工作",
+      "details": null,
+      "timestamp": "2025-07-31T07:40:31.336Z"
+    },
+    {
+      "test": "枚举类型验证",
+      "status": "PASS",
+      "message": "用户角色枚举类型验证正常",
+      "details": null,
+      "timestamp": "2025-07-31T07:40:31.338Z"
+    }
+  ],
+  "recommendations": [
+    "安全测试通过率良好，继续保持安全最佳实践",
+    "定期运行此安全测试以确保持续的安全性",
+    "在生产环境部署前，确保所有安全测试通过"
+  ],
+  "timestamp": "2025-07-31T07:40:31.339Z"
+}
