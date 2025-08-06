@@ -39,6 +39,8 @@ model User {
   favorites     Favorite[]
   uploads       Upload[]  // 上传记录
   reviewed_media Media[]  @relation("MediaReviewer") // 审核的媒体
+  operation_logs OperationLog[] // 操作记录
+  login_logs    LoginLog[]     // 登录记录
 
   @@index([username])
   @@index([email])
@@ -70,6 +72,7 @@ model Media {
   width       Int?                           // 原始视频宽度（像素）
   height      Int?                           // 原始视频高度（像素）
   status      MediaStatus @default(PENDING)  // 审核状态
+  visibility  MediaVisibility @default(VISIBLE) // 可见状态
   review_comment String?  @db.VarChar(500)   // 审核备注（拒绝原因、审核建议等）
   reviewed_by Int?                           // 审核员ID
   reviewed_at DateTime?                      // 审核时间
@@ -88,7 +91,7 @@ model Media {
   reviewer    User?    @relation("MediaReviewer", fields: [reviewed_by], references: [id]) // 审核员关联
   category_id String?
   category    Category? @relation(fields: [category_id], references: [id])
-  tags        MediaTag[]
+  media_tags  MediaTag[]
   comments    Comment[]
   favorites   Favorite[]
   video_qualities VideoQuality[] // 新增：视频清晰度关联
@@ -108,7 +111,11 @@ enum MediaStatus {
   PENDING   // 待审核
   APPROVED  // 已发布
   REJECTED  // 已拒绝
-  PRIVATE   // 用户暂存，不发布
+}
+
+enum MediaVisibility {
+  VISIBLE   // 显示（公开可见）
+  HIDDEN    // 隐藏（管理员隐藏）
 }
 
 enum MediaSource {
@@ -244,4 +251,81 @@ enum UploadStatus {
   COMPLETED  // 已完成
   FAILED     // 失败
   EXPIRED    // 已过期
+}
+
+// =====================================
+// OperationLog 操作记录表
+// =====================================
+model OperationLog {
+  id            String   @id @default(uuid())
+  operation_type OperationType           // 操作类型
+  module        String   @db.VarChar(50) // 操作模块（users, media, tags等）
+  action        String   @db.VarChar(50) // 具体操作（create, update, delete等）
+  target_type   String   @db.VarChar(50) // 目标对象类型
+  target_id     String?                  // 目标对象ID
+  target_name   String?  @db.VarChar(200) // 目标对象名称（便于显示）
+  old_values    Json?                    // 操作前的值
+  new_values    Json?                    // 操作后的值  
+  ip_address    String?  @db.VarChar(45) // 操作者IP地址
+  user_agent    String?  @db.VarChar(500) // 浏览器标识
+  description   String?  @db.VarChar(500) // 操作描述
+  result        OperationResult @default(SUCCESS) // 操作结果
+  error_message String?                  // 错误信息（失败时）
+  created_at    DateTime @default(now())
+
+  // 关联关系
+  user_id       Int      @map("user_id")
+  user          User     @relation(fields: [user_id], references: [id])
+
+  @@index([user_id, created_at])
+  @@index([module, action])
+  @@index([operation_type, created_at])
+  @@index([target_type, target_id])
+}
+
+enum OperationType {
+  USER_ACTION      // 用户操作（登录、上传、举报等）
+  MEDIA_ACTION     // 媒体操作（上传、删除、编辑、状态变更等）
+  ADMIN_ACTION     // 管理员操作（审核、用户管理等）
+  SYSTEM_ACTION    // 系统操作（自动处理、定时任务等）
+}
+
+enum OperationResult {
+  SUCCESS
+  FAILED
+  PARTIAL  // 部分成功（批量操作时）
+}
+
+// =====================================
+// LoginLog 登录记录表
+// =====================================
+model LoginLog {
+  id         String   @id @default(uuid())
+  login_type LoginType @default(PASSWORD) // 登录方式
+  ip_address String   @db.VarChar(45)     // 登录IP
+  user_agent String   @db.VarChar(500)    // 浏览器标识
+  location   String?  @db.VarChar(100)    // 登录地点（可选）
+  result     LoginResult @default(SUCCESS) // 登录结果
+  fail_reason String? @db.VarChar(200)    // 失败原因
+  created_at DateTime @default(now())
+
+  // 关联关系
+  user_id    Int?     @map("user_id")    // 可为空，支持失败登录记录
+  user       User?    @relation(fields: [user_id], references: [id])
+
+  @@index([user_id, created_at])
+  @@index([ip_address, created_at])
+  @@index([result, created_at])
+}
+
+enum LoginType {
+  PASSWORD      // 密码登录
+  OAUTH         // 第三方登录
+  REMEMBER_ME   // 记住我登录
+}
+
+enum LoginResult {
+  SUCCESS
+  FAILED
+  BLOCKED       // 被阻止（频繁失败等）
 }

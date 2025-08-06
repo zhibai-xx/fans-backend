@@ -16,6 +16,8 @@ import { AuthModule } from './auth/auth.module';
 import { UploadModule } from './upload/upload.module';
 import { PerformanceModule } from './common/performance.module';
 import { PerformanceMiddleware } from './common/middleware/performance.middleware';
+import { LogsModule } from './logs/logs.module';
+import { AdminDashboardModule } from './admin/admin-dashboard.module';
 
 @Module({
   imports: [
@@ -45,6 +47,8 @@ import { PerformanceMiddleware } from './common/middleware/performance.middlewar
     AuthModule,
     UploadModule,
     PerformanceModule,
+    LogsModule,
+    AdminDashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService, {
