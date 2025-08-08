@@ -127,10 +127,20 @@ export class MediaService {
         userId?: number;
         mediaType?: MediaType;
         status?: MediaStatus;
+        categoryId?: string;
+        tagId?: string;
+        search?: string;
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
         skip?: number;
         take?: number;
     }) {
-        const { userId, mediaType, status, skip = 0, take = 10 } = options;
+        const { userId, mediaType, status, categoryId, tagId, search, sortBy = 'created_at', sortOrder = 'desc', skip = 0, take = 10 } = options;
+
+        // 验证排序字段
+        const validSortFields = ['created_at', 'views', 'likes_count', 'updated_at'];
+        const validSortBy = validSortFields.includes(sortBy) ? sortBy : 'created_at';
+        const validSortOrder = ['asc', 'desc'].includes(sortOrder) ? sortOrder as 'asc' | 'desc' : 'desc';
 
         // 构建查询条件
         const where: Prisma.MediaWhereInput = {};
@@ -147,13 +157,32 @@ export class MediaService {
             where.status = status;
         }
 
+        if (categoryId) {
+            where.category_id = categoryId;
+        }
+
+        if (tagId) {
+            where.media_tags = {
+                some: {
+                    tag_id: tagId
+                }
+            };
+        }
+
+        if (search) {
+            where.OR = [
+                { title: { contains: search, mode: 'insensitive' } },
+                { description: { contains: search, mode: 'insensitive' } }
+            ];
+        }
+
         // 查询媒体列表
         const [media, total] = await Promise.all([
             this.databaseService.media.findMany({
                 where,
                 skip,
                 take,
-                orderBy: { created_at: 'desc' },
+                orderBy: { [validSortBy]: validSortOrder },
                 include: {
                     user: {
                         select: {

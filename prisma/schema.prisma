@@ -37,6 +37,7 @@ model User {
   uploaded_media Media[]   @relation("MediaUploader") // 上传的内容
   comments      Comment[] 
   favorites     Favorite[]
+  likes         Like[]    // 点赞记录
   uploads       Upload[]  // 上传记录
   reviewed_media Media[]  @relation("MediaReviewer") // 审核的媒体
   operation_logs OperationLog[] // 操作记录
@@ -76,9 +77,10 @@ model Media {
   review_comment String?  @db.VarChar(500)   // 审核备注（拒绝原因、审核建议等）
   reviewed_by Int?                           // 审核员ID
   reviewed_at DateTime?                      // 审核时间
-  views       Int      @default(0)           // 观看次数
-  likes_count Int      @default(0)           // 点赞数
-  source      MediaSource @default(USER_UPLOAD) // 媒体来源
+  views          Int      @default(0)           // 观看次数
+  likes_count    Int      @default(0)           // 点赞数
+  favorites_count Int     @default(0)           // 收藏数
+  source         MediaSource @default(USER_UPLOAD) // 媒体来源
   original_created_at DateTime?              // 原始创建时间（微博发布时间等）
   source_metadata Json?                      // 来源相关元数据（微博ID、转发数等）
   created_at  DateTime @default(now())
@@ -94,6 +96,7 @@ model Media {
   media_tags  MediaTag[]
   comments    Comment[]
   favorites   Favorite[]
+  likes       Like[]    // 点赞关联
   video_qualities VideoQuality[] // 新增：视频清晰度关联
   upload      Upload?   // 上传记录（一对一）
 
@@ -193,6 +196,23 @@ model Favorite {
   media      Media  @relation(fields: [media_id], references: [id])
 
   @@unique([user_id, media_id]) // 禁止重复收藏
+}
+
+// =====================================
+// Like 点赞表
+// =====================================
+model Like {
+  id         String   @id @default(uuid())
+  created_at DateTime @default(now())
+
+  // 关联关系
+  user_id    Int @map("user_id")
+  user       User   @relation(fields: [user_id], references: [id])
+  media_id   String @map("media_id")
+  media      Media  @relation(fields: [media_id], references: [id])
+
+  @@unique([user_id, media_id]) // 禁止重复点赞
+  @@index([media_id, created_at]) // 按媒体和时间排序
 }
 
 // 新增：视频清晰度模型

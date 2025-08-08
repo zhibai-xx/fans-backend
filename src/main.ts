@@ -95,7 +95,7 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);
 
-  // 启动应用并监听指定端口，如果环境变量没有设置端口则使用3000
-  await app.listen(process.env.PORT ?? 3000);
+  // 启动应用并监听指定端口，如果环境变量没有设置端口则使用3001
+  await app.listen(process.env.PORT ?? 3001);
 }
 bootstrap();

@@ -72,6 +72,9 @@ export class MediaResponseDto {
   @ApiProperty({ description: '点赞数' })
   likes_count: number;
 
+  @ApiProperty({ description: '收藏数' })
+  favorites_count: number;
+
   @ApiProperty({ description: '媒体来源' })
   source: string;
 
@@ -116,6 +119,7 @@ export class MediaResponseDto {
     this.status = media.status;
     this.views = media.views;
     this.likes_count = media.likes_count;
+    this.favorites_count = media.favorites_count;
     this.source = media.source;
     this.original_created_at = media.original_created_at;
     this.source_metadata = media.source_metadata;
@@ -138,8 +142,8 @@ export class MediaResponseDto {
       description: media.category.description,
     } : undefined;
 
-    // 标签信息
-    this.tags = media.tags?.map((mediaTag: any) => ({
+    // 标签信息 - 修复：使用media_tags而不是tags
+    this.tags = media.media_tags?.map((mediaTag: any) => ({
       id: mediaTag.tag.id,
       name: mediaTag.tag.name,
     })) || [];

@@ -63,10 +63,15 @@ export class MediaController {
         @Query('userUuid') userUuid?: string,
         @Query('type') type?: MediaType,
         @Query('status') status?: MediaStatus,
+        @Query('categoryId') categoryId?: string,
+        @Query('tagId') tagId?: string,
+        @Query('search') search?: string,
+        @Query('sortBy') sortBy?: string,
+        @Query('sortOrder') sortOrder?: string,
         @Query('skip', new ParseIntPipe({ optional: true })) skip?: number,
         @Query('take', new ParseIntPipe({ optional: true })) take?: number,
     ) {
-        this.logger.log(`获取媒体列表: userUuid=${userUuid}, type=${type}, status=${status}, skip=${skip}, take=${take}`, MediaController.name);
+        this.logger.log(`获取媒体列表: userUuid=${userUuid}, type=${type}, status=${status}, categoryId=${categoryId}, tagId=${tagId}, search=${search}, sortBy=${sortBy}, sortOrder=${sortOrder}, skip=${skip}, take=${take}`, MediaController.name);
 
         // 如果提供了userUuid，转换为内部ID
         let userId: number | undefined;
@@ -78,6 +83,11 @@ export class MediaController {
             userId,
             mediaType: type,
             status,
+            categoryId,
+            tagId,
+            search,
+            sortBy: sortBy || 'created_at',
+            sortOrder: (sortOrder as 'asc' | 'desc') || 'desc',
             skip,
             take
         });
