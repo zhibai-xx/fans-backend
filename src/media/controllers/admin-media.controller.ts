@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   Query,
+  Request,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -214,9 +215,10 @@ export class AdminMediaController {
    */
   @Delete(':id')
   @ApiOperation({ summary: '删除单个媒体' })
-  async deleteMedia(@Param('id') id: string) {
+  async deleteMedia(@Request() req, @Param('id') id: string) {
     try {
-      await this.mediaService.batchDeleteMedia([id]);
+      const adminId = req.user.id;
+      await this.mediaService.batchDeleteMedia([id], adminId);
       return {
         success: true,
         message: '删除成功',
@@ -234,9 +236,10 @@ export class AdminMediaController {
    */
   @Delete('batch')
   @ApiOperation({ summary: '批量删除媒体' })
-  async batchDeleteMedia(@Body() body: BatchDeleteDto) {
+  async batchDeleteMedia(@Request() req, @Body() body: BatchDeleteDto) {
     try {
-      const result = await this.mediaService.batchDeleteMedia(body.mediaIds);
+      const adminId = req.user.id;
+      const result = await this.mediaService.batchDeleteMedia(body.mediaIds, adminId);
       return {
         success: true,
         data: result,
@@ -254,9 +257,10 @@ export class AdminMediaController {
    */
   @Post('batch/delete')
   @ApiOperation({ summary: '批量删除媒体 (POST方式)' })
-  async batchDeleteMediaPost(@Body() body: BatchDeleteDto) {
+  async batchDeleteMediaPost(@Request() req, @Body() body: BatchDeleteDto) {
     try {
-      const result = await this.mediaService.batchDeleteMedia(body.mediaIds);
+      const adminId = req.user.id;
+      const result = await this.mediaService.batchDeleteMedia(body.mediaIds, adminId);
       return {
         success: true,
         data: result,

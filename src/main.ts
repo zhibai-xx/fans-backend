@@ -3,13 +3,14 @@ import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './all-exceptions.filter';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { NestExpressApplication } from '@nestjs/platform-express';
 
 async function bootstrap() {
   // 设置时区为中国标准时间 (UTC+8)
   process.env.TZ = 'Asia/Shanghai';
 
   // 创建NestJS应用实例，完全禁用默认body parser
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false,
   });
 
@@ -79,9 +80,15 @@ async function bootstrap() {
   app.enableCors({
     origin: 'http://localhost:3001',
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    allowedHeaders: ['Content-Type', 'Authorization'], // 明确允许 Authorization
+    allowedHeaders: ['Content-Type', 'Authorization', 'Range'], // 添加Range头支持视频流
+    exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length'], // 暴露视频播放需要的头
     credentials: true,
   });
+  // 设置静态文件服务 - processed文件夹
+  app.useStaticAssets('processed', {
+    prefix: '/processed/',
+  });
+
   // 设置全局API前缀，所有路由都会以/api开头
   app.setGlobalPrefix('api')
 
@@ -95,7 +102,9 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);
 
-  // 启动应用并监听指定端口，如果环境变量没有设置端口则使用3001
-  await app.listen(process.env.PORT ?? 3001);
+  // 启动应用并监听指定端口，如果环境变量没有设置端口则使用3000
+  const port = process.env.PORT ?? 3000;
+  console.log(`🚀 后端服务启动在端口: ${port}`);
+  await app.listen(port);
 }
 bootstrap();

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { UploadService } from './upload.service';
 import { UploadController } from './upload.controller';
 import { FileController } from './controllers/file.controller';
@@ -16,7 +16,7 @@ import { v4 as uuidv4 } from 'uuid';
 @Module({
   imports: [
     DatabaseModule,
-    MediaModule,
+    forwardRef(() => MediaModule),
     ConfigModule,
     MulterModule.register({
       storage: diskStorage({

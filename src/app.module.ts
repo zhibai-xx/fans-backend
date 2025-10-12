@@ -18,6 +18,7 @@ import { PerformanceModule } from './common/performance.module';
 import { PerformanceMiddleware } from './common/middleware/performance.middleware';
 import { LogsModule } from './logs/logs.module';
 import { AdminDashboardModule } from './admin/admin-dashboard.module';
+import { VideoProcessingModule } from './video-processing/video-processing.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { AdminDashboardModule } from './admin/admin-dashboard.module';
     PerformanceModule,
     LogsModule,
     AdminDashboardModule,
+    VideoProcessingModule,
   ],
   controllers: [AppController],
   providers: [AppService, {

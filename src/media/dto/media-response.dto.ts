@@ -32,6 +32,26 @@ export class MediaTagDto {
   name: string;
 }
 
+export class VideoQualityDto {
+  @ApiProperty({ description: '视频质量ID' })
+  id: string;
+
+  @ApiProperty({ description: '质量标识 (720p, 480p, 360p)' })
+  quality: string;
+
+  @ApiProperty({ description: '视频文件URL' })
+  url: string;
+
+  @ApiProperty({ description: '文件大小(字节)' })
+  size: number;
+
+  @ApiProperty({ description: '视频宽度' })
+  width: number;
+
+  @ApiProperty({ description: '视频高度' })
+  height: number;
+}
+
 export class MediaResponseDto {
   @ApiProperty({ description: '媒体ID' })
   id: string;
@@ -102,6 +122,17 @@ export class MediaResponseDto {
   @ApiProperty({ description: '标签列表', type: [MediaTagDto] })
   tags: MediaTagDto[];
 
+  @ApiProperty({ description: '媒体标签关联列表（用于审核页面兼容）' })
+  media_tags: Array<{
+    tag: {
+      id: string;
+      name: string;
+    };
+  }>;
+
+  @ApiProperty({ description: '视频质量列表（仅视频类型有效）', type: [VideoQualityDto], required: false })
+  video_qualities?: VideoQualityDto[];
+
   constructor(media: any, userUuid: string) {
     this.id = media.id;
     this.title = media.title;
@@ -147,6 +178,24 @@ export class MediaResponseDto {
       id: mediaTag.tag.id,
       name: mediaTag.tag.name,
     })) || [];
+
+    // 兼容审核页面的标签格式
+    this.media_tags = media.media_tags?.map((mediaTag: any) => ({
+      tag: {
+        id: mediaTag.tag.id,
+        name: mediaTag.tag.name,
+      }
+    })) || [];
+
+    // 处理视频质量数据（仅对视频类型有效）
+    this.video_qualities = media.video_qualities?.map((quality: any) => ({
+      id: quality.id,
+      quality: quality.quality,
+      url: this.convertToAccessibleUrl(quality.url), // 🔑 关键：也要转换video_qualities的URL
+      size: quality.size,
+      width: quality.width,
+      height: quality.height,
+    })) || [];
   }
 
   /**
@@ -178,19 +227,33 @@ export class MediaResponseDto {
 }
 
 export class MediaListResponseDto {
+  @ApiProperty({ description: '请求是否成功' })
+  success: boolean;
+
   @ApiProperty({ description: '媒体列表', type: [MediaResponseDto] })
   data: MediaResponseDto[];
 
   @ApiProperty({ description: '分页信息' })
-  meta: {
+  pagination: {
+    page: number;
+    limit: number;
     total: number;
-    skip: number;
-    take: number;
-    hasMore: boolean;
+    totalPages: number;
   };
 
-  constructor(data: MediaResponseDto[], meta: any) {
+  constructor(data: MediaResponseDto[], meta: any, skip: number = 0, take: number = 20) {
+    this.success = true;
     this.data = data;
-    this.meta = meta;
+
+    // 将后端的meta格式转换为规范的pagination格式
+    const page = Math.floor(skip / take) + 1;
+    const totalPages = Math.ceil(meta.total / take);
+
+    this.pagination = {
+      page,
+      limit: take,
+      total: meta.total,
+      totalPages
+    };
   }
 } 

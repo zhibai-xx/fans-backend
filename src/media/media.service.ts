@@ -1,5 +1,6 @@
 // src/media/media.service.ts
-import { Injectable, NotFoundException, UnprocessableEntityException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnprocessableEntityException, ForbiddenException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { MediaType, MediaStatus, Prisma } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from 'src/database/database.service';
@@ -17,6 +18,10 @@ import {
 } from './dto/review.dto';
 import { MyLoggerService } from 'src/my-logger/my-logger.service';
 import { FileUtils } from 'src/upload/utils/file.utils';
+import { StorageFactoryService } from 'src/upload/services/storage-factory.service';
+import { VideoProcessingService } from 'src/video-processing/services/video-processing.service';
+import { ThumbnailService } from 'src/video-processing/services/thumbnail.service';
+import * as path from 'path';
 
 @Injectable()
 export class MediaService {
@@ -25,6 +30,11 @@ export class MediaService {
     constructor(
         private readonly databaseService: DatabaseService,
         private configService: ConfigService,
+        private readonly storageFactory: StorageFactoryService,
+        private readonly moduleRef: ModuleRef,
+        @Inject(forwardRef(() => VideoProcessingService))
+        private readonly videoProcessingService: VideoProcessingService,
+        private readonly thumbnailService: ThumbnailService,
     ) { }
 
     /**
@@ -37,6 +47,8 @@ export class MediaService {
         description?: string;
         url: string;
         size: number;
+        width?: number;
+        height?: number;
         media_type: MediaType;
         user_id: number;
         category_id?: string;
@@ -50,6 +62,8 @@ export class MediaService {
                     description: data.description,
                     url: data.url,
                     size: data.size,
+                    width: data.width,
+                    height: data.height,
                     media_type: data.media_type,
                     status: MediaStatus.PENDING,
 
@@ -95,6 +109,59 @@ export class MediaService {
                 const missingTagIds = data.tag_ids.filter(id => !existingTagIds.includes(id));
                 if (missingTagIds.length > 0) {
                     this.logger.warn(`以下标签ID不存在，已跳过: ${missingTagIds.join(', ')}`);
+                }
+            }
+
+            // 如果是视频类型，自动提交视频处理任务
+            if (data.media_type === MediaType.VIDEO) {
+                try {
+                    // 🚀 优化用户体验：立即生成快速封面缩略图
+                    const thumbnailDir = path.join(process.cwd(), 'processed', media.id, 'thumbnails');
+                    const quickCoverPath = path.join(thumbnailDir, 'quick-cover.jpg');
+
+                    // 将URL转换为本地文件路径
+                    let inputPath = data.url;
+                    if (inputPath.includes('/api/upload/file/')) {
+                        inputPath = inputPath.replace(/^.*\/api\/upload\/file\//, 'uploads/');
+                        inputPath = path.join(process.cwd(), inputPath);
+                    }
+
+                    this.logger.debug(`快速封面生成: ${inputPath} -> ${quickCoverPath}`);
+
+                    // 尝试生成快速封面
+                    try {
+                        await this.thumbnailService.generateQuickCover(inputPath, quickCoverPath);
+
+                        // 立即更新数据库中的缩略图URL (通过前端代理访问)
+                        const quickCoverUrl = `/processed/${media.id}/thumbnails/quick-cover.jpg`;
+                        await this.databaseService.media.update({
+                            where: { id: media.id },
+                            data: { thumbnail_url: quickCoverUrl }
+                        });
+
+                        this.logger.log(`⚡ 快速封面已生成并更新: ${media.id}`);
+                    } catch (thumbnailError) {
+                        this.logger.warn(`快速封面生成失败: ${media.id}, ${thumbnailError.message}`);
+                        this.logger.debug(`输入路径: ${inputPath}, 输出路径: ${quickCoverPath}`);
+                        // 不阻塞主流程，继续处理
+                    }
+
+                    // 提交完整的异步视频处理任务
+                    await this.videoProcessingService.submitProcessingJob({
+                        mediaId: media.id,
+                        inputPath: inputPath,
+                        outputDir: path.join(process.cwd(), 'processed', media.id),
+                        userId: data.user_id,
+                        options: {
+                            generateThumbnails: true,
+                            generateHLS: true,
+                            generateQualities: ['720p', '480p', '360p'], // 根据原始质量动态调整
+                        }
+                    });
+                    this.logger.log(`📋 视频处理任务已提交: ${media.id}`);
+                } catch (error) {
+                    this.logger.error(`提交视频处理任务失败: ${media.id}, ${error.message}`, error.stack);
+                    // 不阻塞媒体创建，只记录错误
                 }
             }
 
@@ -296,11 +363,53 @@ export class MediaService {
         }
 
         try {
-            // 注意：实际文件删除现在由 upload 模块处理
-            // 这里只删除数据库记录
+            // 1. 删除物理文件（修复Bug：之前只删数据库不删文件）
+            const storageService = this.storageFactory.getStorage();
+            let fileDeleteSuccess = false;
 
-            // 删除关联的标签、评论和收藏
+            if (media.url) {
+                fileDeleteSuccess = await storageService.deleteFile(media.url);
+                this.logger.log(`删除主文件${fileDeleteSuccess ? '成功' : '失败'}: ${media.url}`);
+            }
+
+            // 删除缩略图
+            if (media.thumbnail_url) {
+                const thumbnailDeleteSuccess = await storageService.deleteFile(media.thumbnail_url);
+                this.logger.log(`删除缩略图${thumbnailDeleteSuccess ? '成功' : '失败'}: ${media.thumbnail_url}`);
+            }
+
+            // 删除视频处理相关文件
+            if (media.media_type === 'VIDEO') {
+                try {
+                    // 删除视频质量文件
+                    const videoQualities = await this.databaseService.videoQuality.findMany({
+                        where: { media_id: id }
+                    });
+
+                    for (const quality of videoQualities) {
+                        if (quality.url) {
+                            await storageService.deleteFile(quality.url);
+                        }
+                        // VideoQuality模型中只有url字段，没有m3u8_url
+                    }
+
+                    // 清理视频处理文件（切片等）
+                    try {
+                        await this.videoProcessingService.cleanupProcessingFiles(id);
+                    } catch (error) {
+                        this.logger.warn(`清理视频处理文件失败: ${error.message}`);
+                    }
+                } catch (error) {
+                    this.logger.warn(`清理视频处理文件失败: ${error.message}`);
+                }
+            }
+
+            // 2. 删除数据库记录（事务）
             await this.databaseService.$transaction([
+                // 删除视频质量记录
+                this.databaseService.videoQuality.deleteMany({
+                    where: { media_id: id }
+                }),
                 // 删除媒体标签关联
                 this.databaseService.mediaTag.deleteMany({
                     where: { media_id: id }
@@ -313,17 +422,101 @@ export class MediaService {
                 this.databaseService.favorite.deleteMany({
                     where: { media_id: id }
                 }),
+                // 删除点赞记录
+                this.databaseService.like.deleteMany({
+                    where: { media_id: id }
+                }),
+                // 删除上传记录
+                this.databaseService.upload.updateMany({
+                    where: { media_id: id },
+                    data: { media_id: null } // 解除关联而不是删除上传记录
+                }),
                 // 删除媒体记录
                 this.databaseService.media.delete({
                     where: { id }
                 })
             ]);
 
-            return { success: true, message: '媒体已成功删除' };
+            return {
+                success: true,
+                message: '媒体及相关文件已成功删除',
+                fileDeleted: fileDeleteSuccess
+            };
         } catch (error) {
             this.logger.error(`删除媒体失败: ${error.message}`, error.stack);
             throw new UnprocessableEntityException(`删除媒体失败: ${error.message}`);
         }
+    }
+
+    /**
+     * 批量删除媒体（管理员用）
+     * @param mediaIds 媒体ID数组
+     * @param adminId 管理员ID
+     * @returns 删除结果
+     */
+    async batchDeleteMedia(mediaIds: string[], adminId: number) {
+        const results: Array<{ id: string, success: boolean, message: string }> = [];
+        const storageService = this.storageFactory.getStorage();
+
+        for (const mediaId of mediaIds) {
+            try {
+                // 查找媒体记录
+                const media = await this.databaseService.media.findUnique({
+                    where: { id: mediaId },
+                    include: { video_qualities: true }
+                });
+
+                if (!media) {
+                    results.push({ id: mediaId, success: false, message: '媒体不存在' });
+                    continue;
+                }
+
+                // 删除物理文件
+                const fileDeletePromises: Promise<boolean>[] = [];
+
+                if (media.url) {
+                    fileDeletePromises.push(storageService.deleteFile(media.url));
+                }
+                if (media.thumbnail_url) {
+                    fileDeletePromises.push(storageService.deleteFile(media.thumbnail_url));
+                }
+
+                // 删除视频质量文件
+                for (const quality of media.video_qualities) {
+                    if (quality.url) fileDeletePromises.push(storageService.deleteFile(quality.url));
+                    // VideoQuality模型中只有url字段，没有m3u8_url
+                }
+
+                await Promise.allSettled(fileDeletePromises);
+
+                // 删除数据库记录
+                await this.databaseService.$transaction([
+                    this.databaseService.videoQuality.deleteMany({ where: { media_id: mediaId } }),
+                    this.databaseService.mediaTag.deleteMany({ where: { media_id: mediaId } }),
+                    this.databaseService.comment.deleteMany({ where: { media_id: mediaId } }),
+                    this.databaseService.favorite.deleteMany({ where: { media_id: mediaId } }),
+                    this.databaseService.like.deleteMany({ where: { media_id: mediaId } }),
+                    this.databaseService.upload.updateMany({
+                        where: { media_id: mediaId },
+                        data: { media_id: null }
+                    }),
+                    this.databaseService.media.delete({ where: { id: mediaId } })
+                ]);
+
+                results.push({ id: mediaId, success: true, message: '删除成功' });
+                this.logger.log(`管理员 ${adminId} 删除媒体 ${mediaId}`);
+
+            } catch (error) {
+                results.push({
+                    id: mediaId,
+                    success: false,
+                    message: error.message || '删除失败'
+                });
+                this.logger.error(`批量删除媒体失败 ${mediaId}: ${error.message}`, error.stack);
+            }
+        }
+
+        return { success: true, results };
     }
 
     /**
@@ -939,7 +1132,8 @@ export class MediaService {
                         include: {
                             tag: true
                         }
-                    }
+                    },
+                    video_qualities: true // 🔑 关键修复：添加video_qualities关联
                 }
             }),
             this.databaseService.media.count({ where })
@@ -2450,7 +2644,8 @@ export class MediaService {
                                     }
                                 }
                             }
-                        }
+                        },
+                        video_qualities: true // 🔑 关键修复：添加video_qualities关联
                     },
                     orderBy: {
                         created_at: 'desc'
@@ -2598,64 +2793,7 @@ export class MediaService {
         }
     }
 
-    /**
-     * 批量删除媒体（管理员专用）
-     */
-    async batchDeleteMedia(mediaIds: string[], adminId?: number) {
-        try {
-            const results = await Promise.allSettled(
-                mediaIds.map(async (id) => {
-                    // 使用事务确保数据一致性
-                    return await this.databaseService.$transaction(async (prisma) => {
-                        // 首先删除关联的标签关系
-                        await prisma.mediaTag.deleteMany({
-                            where: { media_id: id }
-                        });
 
-                        // 删除收藏关系
-                        await prisma.favorite.deleteMany({
-                            where: { media_id: id }
-                        });
-
-                        // 删除评论
-                        await prisma.comment.deleteMany({
-                            where: { media_id: id }
-                        });
-
-                        // 最后删除媒体本身
-                        return await prisma.media.delete({
-                            where: { id }
-                        });
-                    });
-                })
-            );
-
-            const successCount = results.filter(r => r.status === 'fulfilled').length;
-            const failedCount = results.filter(r => r.status === 'rejected').length;
-
-            // 记录失败的详细信息
-            const failedResults = results.filter(r => r.status === 'rejected') as PromiseRejectedResult[];
-            if (failedCount > 0) {
-                failedResults.forEach((result, index) => {
-                    this.logger.warn(`删除媒体 ${mediaIds[results.indexOf(result)]} 失败: ${result.reason?.message}`);
-                });
-            }
-
-            this.logger.log(`批量删除媒体完成: 成功${successCount}个, 失败${failedCount}个`);
-
-            return {
-                successCount,
-                failedCount,
-                failedDetails: failedResults.map((result, index) => ({
-                    mediaId: mediaIds[results.indexOf(result)],
-                    error: result.reason?.message || '未知错误'
-                }))
-            };
-        } catch (error) {
-            this.logger.error(`批量删除媒体失败: ${error.message}`, error.stack);
-            throw new UnprocessableEntityException(`批量删除媒体失败: ${error.message}`);
-        }
-    }
 
     /**
      * 单个媒体显示状态更新（管理员专用）

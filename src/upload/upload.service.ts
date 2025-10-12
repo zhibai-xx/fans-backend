@@ -1,8 +1,9 @@
-import { Injectable, BadRequestException, NotFoundException, InternalServerErrorException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, InternalServerErrorException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from 'src/database/database.service';
 import { MediaService } from '../media/media.service';
 import { StorageFactoryService } from './services/storage-factory.service';
+import * as sharp from 'sharp';
 import {
   InitUploadDto,
   UploadChunkDto,
@@ -54,6 +55,7 @@ export class UploadService {
   constructor(
     private readonly prisma: DatabaseService,
     private readonly configService: ConfigService,
+    @Inject(forwardRef(() => MediaService))
     private readonly mediaService: MediaService,
     private readonly storageFactory: StorageFactoryService,
   ) {
@@ -472,15 +474,37 @@ export class UploadService {
 
       // 创建媒体记录
       const metadata = upload.metadata as any;
+
+      // 处理标签：将标签名称转换为标签ID
+      let tagIds: string[] = [];
+      if (metadata.tagIds && metadata.tagIds.length > 0) {
+        tagIds = await this.resolveTagIds(metadata.tagIds);
+      }
+
+      // 提取图片尺寸信息
+      let width: number | undefined;
+      let height: number | undefined;
+      if (upload.file_type === FileType.IMAGE) {
+        try {
+          const imageMetadata = await sharp(finalPath).metadata();
+          width = imageMetadata.width;
+          height = imageMetadata.height;
+        } catch (error) {
+          this.logger.warn(`提取图片尺寸信息失败: ${error.message}`);
+        }
+      }
+
       const media = await this.mediaService.create({
         title: metadata.title,
         description: metadata.description,
         url: finalPath,
         size: Number(upload.file_size),
+        width,
+        height,
         media_type: upload.file_type === FileType.IMAGE ? MediaType.IMAGE : MediaType.VIDEO,
         user_id: userId,
         category_id: metadata.categoryId,
-        tag_ids: metadata.tagIds || [],
+        tag_ids: tagIds,
       });
 
       if (!media) {
@@ -647,6 +671,53 @@ export class UploadService {
     // 清理分片文件
     const uploadChunkDir = path.join(this.chunkDir, upload.id);
     await fs.remove(uploadChunkDir);
+  }
+
+  /**
+   * 将标签名称转换为标签ID，如果标签不存在则创建
+   * @param tagNames 标签名称数组
+   * @returns 标签ID数组
+   */
+  private async resolveTagIds(tagNames: string[]): Promise<string[]> {
+    const tagIds: string[] = [];
+
+    for (const tagName of tagNames) {
+      if (!tagName || tagName.trim() === '') {
+        continue;
+      }
+
+      const trimmedName = tagName.trim();
+
+      // 先查找是否存在该标签
+      let tag = await this.prisma.tag.findUnique({
+        where: { name: trimmedName }
+      });
+
+      // 如果不存在则创建
+      if (!tag) {
+        try {
+          tag = await this.prisma.tag.create({
+            data: { name: trimmedName }
+          });
+          this.logger.log(`创建新标签: ${trimmedName}`);
+        } catch (error) {
+          // 处理并发创建的情况，可能其他请求已经创建了相同标签
+          if (error.code === 'P2002') { // Prisma unique constraint error
+            tag = await this.prisma.tag.findUnique({
+              where: { name: trimmedName }
+            });
+          }
+          if (!tag) {
+            this.logger.error(`创建标签失败: ${trimmedName}`, error);
+            continue;
+          }
+        }
+      }
+
+      tagIds.push(tag.id);
+    }
+
+    return tagIds;
   }
 
   /**

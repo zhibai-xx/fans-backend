@@ -101,7 +101,7 @@ export class MediaController {
             new MediaResponseDto(media, userUuidMapping[media.user_id])
         );
 
-        return new MediaListResponseDto(mediaList, result.meta);
+        return new MediaListResponseDto(mediaList, result.meta, skip || 0, take || 20);
     }
 
     // =====================================
@@ -399,7 +399,7 @@ export class MediaController {
             new MediaResponseDto(media, userUuidMapping[media.user_id])
         );
 
-        return new MediaListResponseDto(mediaList, result.meta);
+        return new MediaListResponseDto(mediaList, result.meta, filters.skip || 0, filters.take || 20);
     }
 
     /**

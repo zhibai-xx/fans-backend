@@ -3,11 +3,12 @@ import {
   Get,
   Param,
   Res,
+  Req,
   NotFoundException,
   StreamableFile,
   Header
 } from '@nestjs/common';
-import { Response } from 'express';
+import { Response, Request } from 'express';
 import { join } from 'path';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -35,6 +36,7 @@ export class FileController {
   async serveFile(
     @Param('type') type: string,
     @Param('filename') filename: string,
+    @Req() req: Request,
     @Res() res: Response // 移除 passthrough，直接控制响应
   ): Promise<void> {
     console.log('📁 FileController.serveFile - 文件类型:', type, '文件名:', filename);
@@ -68,19 +70,49 @@ export class FileController {
 
       // 获取文件信息
       const stat = fs.statSync(filePath);
-
-      // 设置正确的Content-Type和头部
       const contentType = this.getContentType(filePath);
-      res.set({
-        'Content-Type': contentType,
-        'Content-Length': stat.size.toString(),
-        'Content-Disposition': `inline; filename="${path.basename(filePath)}"`,
-        'Cache-Control': 'max-age=2592000', // 30天缓存
-      });
 
-      // 创建文件流并直接pipe到响应
-      const fileStream = fs.createReadStream(filePath);
-      fileStream.pipe(res);
+      // 检查是否是Range请求（用于视频流播放）
+      const range = req.headers.range;
+
+      if (range && contentType.startsWith('video/')) {
+        console.log('📹 处理Range请求:', range);
+
+        // 解析Range头
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+        const chunksize = (end - start) + 1;
+
+        // 设置Range响应头
+        res.status(206);
+        res.set({
+          'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunksize.toString(),
+          'Content-Type': contentType,
+          'Cache-Control': 'max-age=2592000',
+        });
+
+        // 创建Range文件流
+        const fileStream = fs.createReadStream(filePath, { start, end });
+        fileStream.pipe(res);
+      } else {
+        // 普通请求
+        console.log('📄 处理普通文件请求');
+
+        res.set({
+          'Content-Type': contentType,
+          'Content-Length': stat.size.toString(),
+          'Content-Disposition': `inline; filename="${path.basename(filePath)}"`,
+          'Cache-Control': 'max-age=2592000', // 30天缓存
+          'Accept-Ranges': 'bytes', // 告知客户端支持Range请求
+        });
+
+        // 创建文件流并直接pipe到响应
+        const fileStream = fs.createReadStream(filePath);
+        fileStream.pipe(res);
+      }
 
     } catch (error) {
       console.log('💥 FileController 错误:', error.message);
