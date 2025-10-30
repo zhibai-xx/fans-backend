@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Dependencies: node (npm), curl, openapi-generator-cli
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/openapi:gen [--skip-sdk]
+
+Refreshes the local OpenAPI contract (contracts/openapi.json) and optional generated client.
+Options:
+  --skip-sdk  Do not run the client generator step.
+  -h, --help  Show this help message.
+
+Environment variables:
+  OPENAPI_URL           Override the source URL (default: http://localhost:3000/api-json)
+  OPENAPI_OUTPUT_DIR    Override output directory (default: contracts)
+  OPENAPI_GENERATOR_CMD Override openapi-generator command (default: npx openapi-generator-cli)
+USAGE
+}
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+OUTPUT_DIR="${OPENAPI_OUTPUT_DIR:-$ROOT_DIR/contracts}"
+SPEC_FILE="$OUTPUT_DIR/openapi.json"
+CLIENT_DIR="$OUTPUT_DIR/generated-client"
+API_URL="${OPENAPI_URL:-http://localhost:3000/api-json}"
+GENERATOR_CMD=("${OPENAPI_GENERATOR_CMD:-npx}" openapi-generator-cli)
+
+SKIP_SDK=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --skip-sdk)
+      SKIP_SDK=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+mkdir -p "$OUTPUT_DIR"
+
+TMP_SPEC="$SPEC_FILE.tmp"
+
+if ! curl -fsSL "$API_URL" -o "$TMP_SPEC"; then
+  echo "[openapi:gen] Failed to fetch $API_URL. Ensure the NestJS app is running (npm run start:dev)." >&2
+  rm -f "$TMP_SPEC"
+  exit 1
+fi
+
+mv "$TMP_SPEC" "$SPEC_FILE"
+echo "[openapi:gen] Updated OpenAPI spec at $SPEC_FILE"
+
+if [[ "$SKIP_SDK" == true ]]; then
+  echo "[openapi:gen] Skipping SDK generation as requested."
+  exit 0
+fi
+
+mkdir -p "$CLIENT_DIR"
+
+if ! command -v "${GENERATOR_CMD[0]}" >/dev/null 2>&1; then
+  echo "[openapi:gen] Generator command ${GENERATOR_CMD[0]} not found. Install openapi-generator-cli or set OPENAPI_GENERATOR_CMD." >&2
+  exit 1
+fi
+
+"${GENERATOR_CMD[@]}" generate \
+  -i "$SPEC_FILE" \
+  -g typescript-axios \
+  -o "$CLIENT_DIR" \
+  --additional-properties=supportsES6=true,useSingleRequestParameter=true
+
+echo "[openapi:gen] Generated client at $CLIENT_DIR"

@@ -6,7 +6,15 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['eslint.config.mjs'],
+    ignores: [
+      'eslint.config.mjs',
+      'dist/**',
+      'contracts/**',
+      'contracts/generated-client/**',
+      'prisma/seed.ts',
+      'scripts/**',
+      'tests/**',
+    ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
@@ -20,7 +28,7 @@ export default tseslint.config(
       ecmaVersion: 5,
       sourceType: 'module',
       parserOptions: {
-        projectService: true,
+        project: './tsconfig.eslint.json',
         tsconfigRootDir: import.meta.dirname,
       },
     },

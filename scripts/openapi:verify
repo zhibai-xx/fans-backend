@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Dependencies: node (npm), curl, diffutils
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONTRACTS_DIR="$ROOT_DIR/contracts"
+REFERENCE_SPEC="$CONTRACTS_DIR/openapi.json"
+
+if [ ! -f "$REFERENCE_SPEC" ]; then
+  echo "[openapi:verify] Reference spec not found at $REFERENCE_SPEC" >&2
+  echo "[openapi:verify] Generate it first using scripts/openapi:gen" >&2
+  exit 1
+fi
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+export OPENAPI_OUTPUT_DIR="$TMP_DIR"
+
+if ! bash "$ROOT_DIR/scripts/openapi:gen" --skip-sdk; then
+  echo "[openapi:verify] Failed to regenerate OpenAPI spec. Ensure the NestJS app is running." >&2
+  exit 1
+fi
+
+NEW_SPEC="$TMP_DIR/openapi.json"
+
+if [ ! -f "$NEW_SPEC" ]; then
+  echo "[openapi:verify] Generated spec missing at $NEW_SPEC" >&2
+  exit 1
+fi
+
+diff -u "$REFERENCE_SPEC" "$NEW_SPEC" || {
+  echo "[openapi:verify] Contract drift detected. Run scripts/openapi:gen to refresh." >&2
+  exit 1
+}
+
+echo "[openapi:verify] OpenAPI contract matches current controllers."
