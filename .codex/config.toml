@@ -1,0 +1,33 @@
+model = "gpt-5-codex"
+reasoning = "medium"
+execution = "local"
+approvals = "auto"
+network = "disabled"
+
+[workspace]
+root = "."
+docs_dir = "docs"
+tests_dir = "tests"
+
+[limits]
+max_upload_size_mb = 50
+
+[api]
+login_path = "/api/users/login"
+error_message_delimiter = ";"
+
+[workflow]
+contract_source = "swagger"
+database_tool = "prisma"
+
+[preferences]
+language = "zh"
+
+# 合并说明
+# - 初次创建该文件, 无需合并历史内容
+
+# 与 .cursorrules 差异
+# - 无; 配置完全遵循 .cursorrules 规范
+
+# 与 .cursorrules 的潜在冲突 & 处理策略
+# - 当前配置与 .cursorrules 一致; 若需调整模型或网络设置, 需先评估影响并记录审批
