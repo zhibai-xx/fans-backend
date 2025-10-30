@@ -56,4 +56,4 @@ export default registerAs('performance', () => ({
     metricsInterval: parseInt(process.env.METRICS_INTERVAL || '30000'), // 30秒
     logLevel: process.env.LOG_LEVEL || 'info',
   },
-})); 
+}));

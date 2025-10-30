@@ -77,4 +77,4 @@ export class PublicUserResponseDto {
     this.role = user.role;
     this.created_at = user.created_at;
   }
-} 
+}

@@ -1,5 +1,10 @@
 import { Controller, Get, UseGuards, Logger } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminRoleGuard } from '../auth/guards/admin-role.guard';
 import { AdminDashboardService } from './admin-dashboard.service';
@@ -11,7 +16,7 @@ import { AdminDashboardService } from './admin-dashboard.service';
 export class AdminDashboardController {
   private readonly logger = new Logger(AdminDashboardController.name);
 
-  constructor(private readonly dashboardService: AdminDashboardService) { }
+  constructor(private readonly dashboardService: AdminDashboardService) {}
 
   /**
    * 获取管理面板统计数据

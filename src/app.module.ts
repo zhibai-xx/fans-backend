@@ -16,6 +16,7 @@ import { AuthModule } from './auth/auth.module';
 import { UploadModule } from './upload/upload.module';
 import { PerformanceModule } from './common/performance.module';
 import { PerformanceMiddleware } from './common/middleware/performance.middleware';
+import { OperationLogMiddleware } from './common/middleware/operation-log.middleware';
 import { LogsModule } from './logs/logs.module';
 import { AdminDashboardModule } from './admin/admin-dashboard.module';
 import { VideoProcessingModule } from './video-processing/video-processing.module';
@@ -30,19 +31,23 @@ import { VideoProcessingModule } from './video-processing/video-processing.modul
     }),
     DatabaseModule,
     EmployeesModule,
-    ThrottlerModule.forRoot([{
-      name: 'short',
-      ttl: 1000,
-      limit: 10
-    }, {
-      name: 'medium',
-      ttl: 10000,
-      limit: 50
-    }, {
-      name: 'long',
-      ttl: 60000,
-      limit: 200
-    }]),
+    ThrottlerModule.forRoot([
+      {
+        name: 'short',
+        ttl: 1000,
+        limit: 10,
+      },
+      {
+        name: 'medium',
+        ttl: 10000,
+        limit: 50,
+      },
+      {
+        name: 'long',
+        ttl: 60000,
+        limit: 200,
+      },
+    ]),
     MyLoggerModule,
     MediaModule,
     AuthModule,
@@ -53,15 +58,18 @@ import { VideoProcessingModule } from './video-processing/video-processing.modul
     VideoProcessingModule,
   ],
   controllers: [AppController],
-  providers: [AppService, {
-    provide: APP_GUARD,
-    useClass: ThrottlerGuard
-  }],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer
-      .apply(PerformanceMiddleware)
+      .apply(PerformanceMiddleware, OperationLogMiddleware)
       .forRoutes('*');
   }
 }

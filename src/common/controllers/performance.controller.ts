@@ -1,7 +1,16 @@
 import { Controller, Get, Post, UseGuards, Logger } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { DatabasePerformanceService, PerformanceReport, QueryMetrics } from '../../database/database-performance.service';
+import {
+  DatabasePerformanceService,
+  PerformanceReport,
+  QueryMetrics,
+} from '../../database/database-performance.service';
 import { ResponseOptimizationInterceptor } from '../interceptors/response-optimization.interceptor';
 
 @ApiTags('性能监控')
@@ -13,8 +22,8 @@ export class PerformanceController {
 
   constructor(
     private readonly dbPerformanceService: DatabasePerformanceService,
-    private readonly responseOptimizationInterceptor: ResponseOptimizationInterceptor
-  ) { }
+    private readonly responseOptimizationInterceptor: ResponseOptimizationInterceptor,
+  ) {}
 
   /**
    * 获取数据库性能报告
@@ -32,7 +41,7 @@ export class PerformanceController {
       return {
         success: true,
         data: report,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
     } catch (error) {
       this.logger.error('获取数据库性能报告失败:', error);
@@ -48,11 +57,12 @@ export class PerformanceController {
   @ApiResponse({ status: 200, description: '获取成功' })
   async getDatabaseOptimizationSuggestions() {
     try {
-      const suggestions = await this.dbPerformanceService.getOptimizationSuggestions();
+      const suggestions =
+        await this.dbPerformanceService.getOptimizationSuggestions();
       return {
         success: true,
         data: suggestions,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
     } catch (error) {
       this.logger.error('获取数据库优化建议失败:', error);
@@ -70,7 +80,10 @@ export class PerformanceController {
     success: boolean;
     data: {
       totalQueries: number;
-      queryByModel: Record<string, { count: number; totalDuration: number; avgDuration: number }>;
+      queryByModel: Record<
+        string,
+        { count: number; totalDuration: number; avgDuration: number }
+      >;
       slowestQueries: QueryMetrics[];
       timestamp: Date;
     };
@@ -81,7 +94,7 @@ export class PerformanceController {
       return {
         success: true,
         data: stats,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
     } catch (error) {
       this.logger.error('获取查询统计信息失败:', error);
@@ -101,7 +114,7 @@ export class PerformanceController {
       return {
         success: true,
         data: stats,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
     } catch (error) {
       this.logger.error('获取缓存统计信息失败:', error);
@@ -121,7 +134,7 @@ export class PerformanceController {
       return {
         success: true,
         message: '缓存已清空',
-        timestamp: new Date()
+        timestamp: new Date(),
       };
     } catch (error) {
       this.logger.error('清空缓存失败:', error);
@@ -141,7 +154,7 @@ export class PerformanceController {
       return {
         success: true,
         message: '性能指标历史已清空',
-        timestamp: new Date()
+        timestamp: new Date(),
       };
     } catch (error) {
       this.logger.error('清空性能指标历史失败:', error);
@@ -160,11 +173,14 @@ export class PerformanceController {
       const [dbReport, cacheStats, queryStats] = await Promise.all([
         this.dbPerformanceService.getPerformanceReport(),
         this.responseOptimizationInterceptor.getCacheStats(),
-        this.dbPerformanceService.getQueryStats()
+        this.dbPerformanceService.getQueryStats(),
       ]);
 
       // 计算性能评分
-      const performanceScore = this.calculatePerformanceScore(dbReport, queryStats);
+      const performanceScore = this.calculatePerformanceScore(
+        dbReport,
+        queryStats,
+      );
 
       return {
         success: true,
@@ -174,20 +190,20 @@ export class PerformanceController {
             averageQueryTime: dbReport.averageQueryTime,
             slowQueriesCount: dbReport.slowQueries.length,
             totalQueries: dbReport.queryCount,
-            recommendations: dbReport.recommendations
+            recommendations: dbReport.recommendations,
           },
           cache: {
             hitRate: this.calculateCacheHitRate(cacheStats),
             size: cacheStats.size,
-            maxSize: cacheStats.maxSize
+            maxSize: cacheStats.maxSize,
           },
           queries: {
             totalQueries: queryStats.totalQueries,
             slowestQuery: queryStats.slowestQueries[0]?.duration || 0,
-            modelStats: queryStats.queryByModel
-          }
+            modelStats: queryStats.queryByModel,
+          },
         },
-        timestamp: new Date()
+        timestamp: new Date(),
       };
     } catch (error) {
       this.logger.error('获取系统性能概览失败:', error);
@@ -230,4 +246,4 @@ export class PerformanceController {
     // 这里简化处理，实际应该跟踪命中和未命中次数
     return cacheStats.size > 0 ? 85 : 0;
   }
-} 
+}

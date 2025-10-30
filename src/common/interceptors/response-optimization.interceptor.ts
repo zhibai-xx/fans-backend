@@ -33,14 +33,16 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
 
     // 定义不应该被缓存的URL模式
     const noCachePatterns = [
-      '/api/media/review/stats',    // 审核统计
-      '/api/media/review/list',     // 审核列表
-      '/api/media/review/',         // 所有审核相关API
-      '/api/performance/',          // 性能监控API
-      '/api/upload/',              // 上传相关API
+      '/api/media/review/stats', // 审核统计
+      '/api/media/review/list', // 审核列表
+      '/api/media/review/', // 所有审核相关API
+      '/api/performance/', // 性能监控API
+      '/api/upload/', // 上传相关API
     ];
 
-    const shouldSkipCache = noCachePatterns.some(pattern => url.includes(pattern));
+    const shouldSkipCache = noCachePatterns.some((pattern) =>
+      url.includes(pattern),
+    );
 
     // 只对GET请求进行缓存，但排除实时数据API
     if (method === 'GET' && !shouldSkipCache) {
@@ -51,20 +53,20 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
         // 检查客户端缓存
         if (headers['if-none-match'] === cached.etag) {
           response.status(304).end();
-          return new Observable(subscriber => subscriber.complete());
+          return new Observable((subscriber) => subscriber.complete());
         }
 
         // 返回缓存数据
         this.setResponseHeaders(response, cached.etag, true);
         response.json(cached.data);
-        return new Observable(subscriber => subscriber.complete());
+        return new Observable((subscriber) => subscriber.complete());
       }
     }
 
     const startTime = Date.now();
 
     return next.handle().pipe(
-      map(data => {
+      map((data) => {
         const duration = Date.now() - startTime;
 
         // 记录慢响应
@@ -75,7 +77,7 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
         // 转换BigInt为字符串，解决JSON序列化问题
         return this.convertBigIntToString(data);
       }),
-      tap(async data => {
+      tap(async (data) => {
         // 对GET请求的响应进行缓存，但排除实时数据API
         if (method === 'GET' && !shouldSkipCache && data) {
           const cacheKey = this.generateCacheKey(url, headers);
@@ -87,7 +89,7 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
 
         // 响应压缩
         await this.compressResponse(response, data);
-      })
+      }),
     );
   }
 
@@ -113,7 +115,7 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
     }
 
     if (Array.isArray(data)) {
-      return data.map(item => this.convertBigIntToString(item));
+      return data.map((item) => this.convertBigIntToString(item));
     }
 
     if (typeof data === 'object') {
@@ -187,7 +189,11 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
   /**
    * 设置响应头
    */
-  private setResponseHeaders(response: Response, etag: string, fromCache: boolean): void {
+  private setResponseHeaders(
+    response: Response,
+    etag: string,
+    fromCache: boolean,
+  ): void {
     // 检查响应是否已经发送
     if (response.headersSent) {
       return;
@@ -259,4 +265,4 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
     this.cache.clear();
     this.logger.log('响应缓存已清空');
   }
-} 
+}

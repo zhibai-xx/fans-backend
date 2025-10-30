@@ -8,4 +8,4 @@ import { ConfigModule } from '@nestjs/config';
   providers: [DatabaseService, DatabasePerformanceService],
   exports: [DatabaseService, DatabasePerformanceService],
 })
-export class DatabaseModule { }
+export class DatabaseModule {}

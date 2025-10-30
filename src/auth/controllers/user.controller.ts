@@ -1,13 +1,31 @@
-import { Controller, Post, Body, Get, Put, Param, UseGuards, Request, Req } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Get,
+  Put,
+  Param,
+  UseGuards,
+  Request,
+  Req,
+} from '@nestjs/common';
 import { UserService } from '../services/user.service';
 import { AuthService } from '../services/auth.service';
 import { RegisterDto } from '../dto/register.dto';
 import { LoginDto } from '../dto/login.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
-import { UserResponseDto, PublicUserResponseDto } from '../dto/user-response.dto';
+import {
+  UserResponseDto,
+  PublicUserResponseDto,
+} from '../dto/user-response.dto';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { LoginLogService } from '../../logs/services/login-log.service';
 
 @ApiTags('用户')
@@ -17,7 +35,7 @@ export class UserController {
     private readonly userService: UserService,
     private readonly authService: AuthService,
     private readonly loginLogService: LoginLogService,
-  ) { }
+  ) {}
 
   @Post('register')
   @ApiOperation({ summary: '用户注册' })
@@ -112,7 +130,11 @@ export class UserController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: '获取指定用户信息（公开信息）' })
-  @ApiResponse({ status: 200, description: '获取成功', type: PublicUserResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: '获取成功',
+    type: PublicUserResponseDto,
+  })
   @ApiResponse({ status: 401, description: '未授权' })
   @ApiResponse({ status: 404, description: '用户不存在' })
   async getUserByUuid(@Param('uuid') uuid: string) {
@@ -127,8 +149,11 @@ export class UserController {
   @ApiResponse({ status: 200, description: '密码修改成功' })
   @ApiResponse({ status: 401, description: '当前密码错误或未授权' })
   @ApiResponse({ status: 409, description: '新密码不能与当前密码相同' })
-  async changePassword(@Request() req, @Body() changePasswordDto: ChangePasswordDto) {
+  async changePassword(
+    @Request() req,
+    @Body() changePasswordDto: ChangePasswordDto,
+  ) {
     await this.userService.changePassword(req.user.id, changePasswordDto);
     return { message: '密码修改成功' };
   }
-} 
+}

@@ -32,7 +32,9 @@ async function bootstrap() {
     console.log(`[Body Parser] Raw Headers: ${JSON.stringify(rawHeaders)}`);
 
     // 更严格的multipart检测
-    const isMultipart = contentType.toLowerCase().startsWith('multipart/form-data');
+    const isMultipart = contentType
+      .toLowerCase()
+      .startsWith('multipart/form-data');
     const isUploadChunk = req.path === '/api/upload/chunk';
 
     if (isMultipart || isUploadChunk) {
@@ -59,21 +61,23 @@ async function bootstrap() {
   });
 
   // 获取HTTP适配器，用于异常过滤器
-  const { httpAdapter } = app.get(HttpAdapterHost)
+  const { httpAdapter } = app.get(HttpAdapterHost);
   // 注册全局异常过滤器，处理所有未捕获的异常
   app.useGlobalFilters(
-    new AllExceptionsFilter(httpAdapter)  // 统一异常处理（包含HTTP异常格式统一）
-  )
+    new AllExceptionsFilter(httpAdapter), // 统一异常处理（包含HTTP异常格式统一）
+  );
 
   // 全局验证管道
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true, // 自动删除非 DTO 中定义的属性
-    transform: true, // 自动转换类型
-    forbidNonWhitelisted: true, // 禁止非白名单属性
-    transformOptions: {
-      enableImplicitConversion: true, // 启用隐式类型转换
-    },
-  }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true, // 自动删除非 DTO 中定义的属性
+      transform: true, // 自动转换类型
+      forbidNonWhitelisted: true, // 禁止非白名单属性
+      transformOptions: {
+        enableImplicitConversion: true, // 启用隐式类型转换
+      },
+    }),
+  );
 
   // 启用CORS，允许跨域请求
   // app.enableCors()
@@ -90,7 +94,7 @@ async function bootstrap() {
   });
 
   // 设置全局API前缀，所有路由都会以/api开头
-  app.setGlobalPrefix('api')
+  app.setGlobalPrefix('api');
 
   // 配置 Swagger
   const config = new DocumentBuilder()

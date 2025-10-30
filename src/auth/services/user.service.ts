@@ -1,4 +1,9 @@
-import { Injectable, ConflictException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
 import { RegisterDto } from '../dto/register.dto';
 import { LoginDto } from '../dto/login.dto';
@@ -9,9 +14,7 @@ import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class UserService {
-  constructor(
-    private readonly databaseService: DatabaseService,
-  ) { }
+  constructor(private readonly databaseService: DatabaseService) {}
 
   async register(registerDto: RegisterDto) {
     const { username, email, password, nickname } = registerDto;
@@ -19,11 +22,8 @@ export class UserService {
     // 检查用户名或邮箱是否已存在
     const existingUser = await this.databaseService.user.findFirst({
       where: {
-        OR: [
-          { username },
-          { email }
-        ]
-      }
+        OR: [{ username }, { email }],
+      },
     });
 
     if (existingUser) {
@@ -47,7 +47,7 @@ export class UserService {
 
     // 创建新用户
     const user = await this.databaseService.user.create({
-      data: userData
+      data: userData,
     });
 
     return user;
@@ -57,7 +57,7 @@ export class UserService {
     const { username, password } = loginDto;
 
     const user = await this.databaseService.user.findUnique({
-      where: { username }
+      where: { username },
     });
 
     if (!user) {
@@ -74,7 +74,7 @@ export class UserService {
 
   async updateUser(id: number, updateUserDto: UpdateUserDto) {
     const user = await this.databaseService.user.findUnique({
-      where: { id }
+      where: { id },
     });
 
     if (!user) {
@@ -97,9 +97,9 @@ export class UserService {
         where: {
           OR: orConditions,
           NOT: {
-            id
-          }
-        }
+            id,
+          },
+        },
       });
 
       if (existingUser) {
@@ -113,18 +113,20 @@ export class UserService {
     if (updateUserDto.username) updateData.username = updateUserDto.username;
     if (updateUserDto.email) updateData.email = updateUserDto.email;
     if (updateUserDto.avatar) updateData.avatar_url = updateUserDto.avatar;
-    if (updateUserDto.nickname !== undefined) updateData.nickname = updateUserDto.nickname;
-    if (updateUserDto.phoneNumber !== undefined) updateData.phoneNumber = updateUserDto.phoneNumber;
+    if (updateUserDto.nickname !== undefined)
+      updateData.nickname = updateUserDto.nickname;
+    if (updateUserDto.phoneNumber !== undefined)
+      updateData.phoneNumber = updateUserDto.phoneNumber;
 
     return this.databaseService.user.update({
       where: { id },
-      data: updateData
+      data: updateData,
     });
   }
 
   async findById(id: number) {
     const user = await this.databaseService.user.findUnique({
-      where: { id }
+      where: { id },
     });
 
     if (!user) {
@@ -136,7 +138,7 @@ export class UserService {
 
   async findByUuid(uuid: string) {
     const user = await this.databaseService.user.findUnique({
-      where: { uuid }
+      where: { uuid },
     });
 
     if (!user) {
@@ -148,7 +150,7 @@ export class UserService {
 
   async findByUsername(username: string) {
     const user = await this.databaseService.user.findUnique({
-      where: { username }
+      where: { username },
     });
 
     if (!user) {
@@ -163,7 +165,7 @@ export class UserService {
 
     // 查找用户
     const user = await this.databaseService.user.findUnique({
-      where: { id: userId }
+      where: { id: userId },
     });
 
     if (!user) {
@@ -171,7 +173,10 @@ export class UserService {
     }
 
     // 验证当前密码
-    const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    const isPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.password,
+    );
     if (!isPasswordValid) {
       throw new UnauthorizedException('当前密码错误');
     }
@@ -188,7 +193,7 @@ export class UserService {
     // 更新密码
     return this.databaseService.user.update({
       where: { id: userId },
-      data: { password: hashedNewPassword }
+      data: { password: hashedNewPassword },
     });
   }
 
@@ -208,7 +213,15 @@ export class UserService {
     sortBy?: string;
     sortOrder?: string;
   }) {
-    const { page, limit, search, role, status, sortBy = 'created_at', sortOrder = 'desc' } = filters;
+    const {
+      page,
+      limit,
+      search,
+      role,
+      status,
+      sortBy = 'created_at',
+      sortOrder = 'desc',
+    } = filters;
 
     // 构建查询条件
     const where: any = {};
@@ -217,7 +230,7 @@ export class UserService {
       where.OR = [
         { username: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
-        { nickname: { contains: search, mode: 'insensitive' } }
+        { nickname: { contains: search, mode: 'insensitive' } },
       ];
     }
 
@@ -253,15 +266,15 @@ export class UserService {
           select: {
             uploaded_media: true,
             comments: true,
-            favorites: true
-          }
-        }
+            favorites: true,
+          },
+        },
       },
       orderBy: {
-        [sortBy]: sortOrder
+        [sortBy]: sortOrder,
       },
       skip,
-      take: limit
+      take: limit,
     });
 
     return {
@@ -270,8 +283,8 @@ export class UserService {
         page,
         limit,
         total,
-        totalPages: Math.ceil(total / limit)
-      }
+        totalPages: Math.ceil(total / limit),
+      },
     };
   }
 
@@ -299,10 +312,10 @@ export class UserService {
             comments: true,
             favorites: true,
             operation_logs: true,
-            login_logs: true
-          }
-        }
-      }
+            login_logs: true,
+          },
+        },
+      },
     });
 
     if (!user) {
@@ -317,7 +330,7 @@ export class UserService {
    */
   async updateUserStatus(id: number, status: 'ACTIVE' | 'SUSPENDED') {
     const user = await this.databaseService.user.findUnique({
-      where: { id }
+      where: { id },
     });
 
     if (!user) {
@@ -338,8 +351,8 @@ export class UserService {
         phoneNumber: true,
         avatar_url: true,
         created_at: true,
-        updated_at: true
-      }
+        updated_at: true,
+      },
     });
   }
 
@@ -348,7 +361,7 @@ export class UserService {
    */
   async updateUserRole(id: number, role: 'USER' | 'ADMIN') {
     const user = await this.databaseService.user.findUnique({
-      where: { id }
+      where: { id },
     });
 
     if (!user) {
@@ -358,7 +371,7 @@ export class UserService {
     // 防止降级最后一个管理员
     if (role === 'USER' && user.role === 'ADMIN') {
       const adminCount = await this.databaseService.user.count({
-        where: { role: 'ADMIN' }
+        where: { role: 'ADMIN' },
       });
 
       if (adminCount <= 1) {
@@ -380,22 +393,25 @@ export class UserService {
         phoneNumber: true,
         avatar_url: true,
         created_at: true,
-        updated_at: true
-      }
+        updated_at: true,
+      },
     });
   }
 
   /**
    * 管理员更新用户基本信息
    */
-  async updateUserByAdmin(id: number, updateData: {
-    username?: string;
-    email?: string;
-    nickname?: string;
-    phoneNumber?: string;
-  }) {
+  async updateUserByAdmin(
+    id: number,
+    updateData: {
+      username?: string;
+      email?: string;
+      nickname?: string;
+      phoneNumber?: string;
+    },
+  ) {
     const user = await this.databaseService.user.findUnique({
-      where: { id }
+      where: { id },
     });
 
     if (!user) {
@@ -411,11 +427,11 @@ export class UserService {
             {
               OR: [
                 updateData.username ? { username: updateData.username } : {},
-                updateData.email ? { email: updateData.email } : {}
-              ].filter(obj => Object.keys(obj).length > 0)
-            }
-          ]
-        }
+                updateData.email ? { email: updateData.email } : {},
+              ].filter((obj) => Object.keys(obj).length > 0),
+            },
+          ],
+        },
       });
 
       if (existingUser) {
@@ -437,8 +453,8 @@ export class UserService {
         phoneNumber: true,
         avatar_url: true,
         created_at: true,
-        updated_at: true
-      }
+        updated_at: true,
+      },
     });
   }
 
@@ -459,8 +475,8 @@ export class UserService {
       suspendedUsers,
       adminUsers,
       regularUsers,
-      todayUsers,  // 今日新增用户数
-      recentUsers  // 最近7天新增用户数
+      todayUsers, // 今日新增用户数
+      recentUsers, // 最近7天新增用户数
     ] = await Promise.all([
       // 总用户数
       this.databaseService.user.count(),
@@ -476,18 +492,18 @@ export class UserService {
       this.databaseService.user.count({
         where: {
           created_at: {
-            gte: todayStart
-          }
-        }
+            gte: todayStart,
+          },
+        },
       }),
       // 最近7天注册用户数
       this.databaseService.user.count({
         where: {
           created_at: {
-            gte: weekStart
-          }
-        }
-      })
+            gte: weekStart,
+          },
+        },
+      }),
     ]);
 
     return {
@@ -496,16 +512,16 @@ export class UserService {
       suspendedUsers,
       adminUsers,
       regularUsers,
-      todayUsers,   // 新增：今日用户数
-      recentUsers,  // 保持：7天内用户数
+      todayUsers, // 新增：今日用户数
+      recentUsers, // 保持：7天内用户数
       statusDistribution: {
         active: activeUsers,
-        suspended: suspendedUsers
+        suspended: suspendedUsers,
       },
       roleDistribution: {
         admin: adminUsers,
-        user: regularUsers
-      }
+        user: regularUsers,
+      },
     };
   }
-} 
+}

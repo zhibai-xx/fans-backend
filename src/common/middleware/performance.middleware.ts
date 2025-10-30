@@ -6,7 +6,7 @@ import { ConfigService } from '@nestjs/config';
 export class PerformanceMiddleware implements NestMiddleware {
   private readonly logger = new Logger(PerformanceMiddleware.name);
 
-  constructor(private configService: ConfigService) { }
+  constructor(private configService: ConfigService) {}
 
   use(req: Request, res: Response, next: NextFunction) {
     const startTime = Date.now();
@@ -20,7 +20,11 @@ export class PerformanceMiddleware implements NestMiddleware {
     next();
   }
 
-  private addBasicPerformanceMonitoring(req: Request, res: Response, startTime: number) {
+  private addBasicPerformanceMonitoring(
+    req: Request,
+    res: Response,
+    startTime: number,
+  ) {
     // 只使用事件监听，不重写方法
     res.on('finish', () => {
       const duration = Date.now() - startTime;
@@ -32,7 +36,9 @@ export class PerformanceMiddleware implements NestMiddleware {
 
       // 警告慢请求
       if (duration > 1000) {
-        this.logger.warn(`Slow request: ${method} ${originalUrl} took ${duration}ms`);
+        this.logger.warn(
+          `Slow request: ${method} ${originalUrl} took ${duration}ms`,
+        );
       }
     });
   }
@@ -78,7 +84,9 @@ export class ResponseTimeMiddleware implements NestMiddleware {
 
       // 只在需要时记录到日志，不设置头部
       if (duration > 1000) {
-        this.logger.warn(`Slow response: ${req.method} ${req.originalUrl} - ${duration.toFixed(2)}ms`);
+        this.logger.warn(
+          `Slow response: ${req.method} ${req.originalUrl} - ${duration.toFixed(2)}ms`,
+        );
       }
     });
 
@@ -109,7 +117,9 @@ export class MemoryMonitorMiddleware implements NestMiddleware {
         external: Math.round(memoryUsage.external / 1024 / 1024),
       };
 
-      this.logger.log(`Memory usage: RSS=${memoryMB.rss}MB, Heap=${memoryMB.heapUsed}/${memoryMB.heapTotal}MB, External=${memoryMB.external}MB`);
+      this.logger.log(
+        `Memory usage: RSS=${memoryMB.rss}MB, Heap=${memoryMB.heapUsed}/${memoryMB.heapTotal}MB, External=${memoryMB.external}MB`,
+      );
 
       // 内存使用过高警告
       if (memoryMB.heapUsed > 500) {
@@ -146,4 +156,4 @@ export class RequestLoggerMiddleware implements NestMiddleware {
 
     next();
   }
-} 
+}

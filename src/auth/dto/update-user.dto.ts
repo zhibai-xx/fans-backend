@@ -1,4 +1,10 @@
-import { IsEmail, IsOptional, IsString, MinLength, MaxLength } from 'class-validator';
+import {
+  IsEmail,
+  IsOptional,
+  IsString,
+  MinLength,
+  MaxLength,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class UpdateUserDto {
@@ -9,12 +15,20 @@ export class UpdateUserDto {
   @MaxLength(20, { message: '用户名长度不能超过20个字符' })
   username?: string;
 
-  @ApiProperty({ description: '邮箱', example: 'user@example.com', required: false })
+  @ApiProperty({
+    description: '邮箱',
+    example: 'user@example.com',
+    required: false,
+  })
   @IsOptional()
   @IsEmail({}, { message: '邮箱格式不正确' })
   email?: string;
 
-  @ApiProperty({ description: '头像', example: 'https://example.com/avatar.jpg', required: false })
+  @ApiProperty({
+    description: '头像',
+    example: 'https://example.com/avatar.jpg',
+    required: false,
+  })
   @IsOptional()
   @IsString({ message: '头像必须是字符串' })
   avatar?: string;
@@ -25,14 +39,22 @@ export class UpdateUserDto {
   // @MaxLength(200, { message: '个人简介长度不能超过200个字符' })
   // bio?: string;
 
-  @ApiProperty({ description: '昵称', example: '这是我的昵称', required: false })
+  @ApiProperty({
+    description: '昵称',
+    example: '这是我的昵称',
+    required: false,
+  })
   @IsOptional()
   @IsString({ message: '昵称必须是字符串' })
   @MaxLength(20, { message: '昵称长度不能超过20个字符' })
   nickname?: string;
 
-  @ApiProperty({ description: '手机号码', example: '1**********', required: false })
+  @ApiProperty({
+    description: '手机号码',
+    example: '1**********',
+    required: false,
+  })
   @IsOptional()
   @IsString({ message: '手机号码必须是字符串' })
   phoneNumber?: string;
-} 
+}

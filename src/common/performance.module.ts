@@ -16,4 +16,4 @@ import { ResponseOptimizationInterceptor } from './interceptors/response-optimiz
   ],
   exports: [ResponseOptimizationInterceptor],
 })
-export class PerformanceModule { } 
+export class PerformanceModule {}

@@ -4,35 +4,35 @@ import { DatabaseService } from './database.service';
 
 /**
  * 查询性能指标接口
- * 
+ *
  * 记录单次数据库查询的性能数据
  */
 export interface QueryMetrics {
-  query: string;      // 查询语句
-  duration: number;   // 执行时间（毫秒）
-  timestamp: Date;    // 查询时间戳
-  model?: string;     // 数据模型名称
-  action?: string;    // 操作类型（create, read, update, delete）
+  query: string; // 查询语句
+  duration: number; // 执行时间（毫秒）
+  timestamp: Date; // 查询时间戳
+  model?: string; // 数据模型名称
+  action?: string; // 操作类型（create, read, update, delete）
 }
 
 /**
  * 性能报告接口
- * 
+ *
  * 包含完整的数据库性能分析报告
  */
 export interface PerformanceReport {
-  slowQueries: QueryMetrics[];      // 慢查询列表
-  averageQueryTime: number;         // 平均查询时间
-  queryCount: number;               // 查询总数
-  connectionPoolStats: any;         // 连接池状态
-  indexUsage: any[];                // 索引使用情况
-  tableStats: any[];                // 表统计信息
-  recommendations: string[];        // 优化建议
+  slowQueries: QueryMetrics[]; // 慢查询列表
+  averageQueryTime: number; // 平均查询时间
+  queryCount: number; // 查询总数
+  connectionPoolStats: any; // 连接池状态
+  indexUsage: any[]; // 索引使用情况
+  tableStats: any[]; // 表统计信息
+  recommendations: string[]; // 优化建议
 }
 
 /**
  * 数据库性能监控服务
- * 
+ *
  * 主要功能：
  * 1. 记录和分析数据库查询性能指标
  * 2. 监控慢查询并生成优化建议
@@ -52,18 +52,18 @@ export class DatabasePerformanceService {
 
   constructor(
     private readonly databaseService: DatabaseService,
-    private readonly configService: ConfigService
-  ) { }
+    private readonly configService: ConfigService,
+  ) {}
 
   /**
    * 记录查询性能指标
-   * 
+   *
    * 用于记录每次数据库查询的性能数据，包括：
    * - 查询语句
    * - 执行时间
    * - 时间戳
    * - 模型和操作类型
-   * 
+   *
    * @param metric 查询性能指标对象
    */
   recordQueryMetric(metric: QueryMetrics) {
@@ -77,7 +77,7 @@ export class DatabasePerformanceService {
 
   /**
    * 获取性能报告
-   * 
+   *
    * 分析最近一小时的查询性能数据，生成包含以下内容的报告：
    * - 慢查询列表（执行时间超过200ms的查询）
    * - 平均查询时间
@@ -86,7 +86,7 @@ export class DatabasePerformanceService {
    * - 索引使用情况
    * - 表统计信息
    * - 性能优化建议
-   * 
+   *
    * @returns 完整的性能报告
    */
   async getPerformanceReport(): Promise<PerformanceReport> {
@@ -95,28 +95,30 @@ export class DatabasePerformanceService {
 
     // 过滤最近一小时的查询数据，只分析近期性能
     const recentQueries = this.queryMetrics.filter(
-      metric => metric.timestamp.getTime() > oneHourAgo
+      (metric) => metric.timestamp.getTime() > oneHourAgo,
     );
 
     // 慢查询分析（执行时间超过200ms的查询需要优化）
-    const slowQueries = recentQueries.filter(metric => metric.duration > 200);
+    const slowQueries = recentQueries.filter((metric) => metric.duration > 200);
 
     // 计算平均查询时间，用于评估整体性能
-    const averageQueryTime = recentQueries.length > 0
-      ? recentQueries.reduce((sum, metric) => sum + metric.duration, 0) / recentQueries.length
-      : 0;
+    const averageQueryTime =
+      recentQueries.length > 0
+        ? recentQueries.reduce((sum, metric) => sum + metric.duration, 0) /
+          recentQueries.length
+        : 0;
 
     // 并行获取数据库统计信息，提高性能报告生成效率
     const [connectionPoolStats, dbStats] = await Promise.all([
       this.getConnectionPoolStats(),
-      this.databaseService.getStats()
+      this.databaseService.getStats(),
     ]);
 
     // 基于性能数据生成针对性的优化建议
     const recommendations = this.generateRecommendations(
       slowQueries,
       averageQueryTime,
-      dbStats
+      dbStats,
     );
 
     return {
@@ -126,7 +128,7 @@ export class DatabasePerformanceService {
       connectionPoolStats,
       indexUsage: (dbStats?.indexes || []) as any[],
       tableStats: (dbStats?.tables || []) as any[],
-      recommendations
+      recommendations,
     };
   }
 
@@ -158,41 +160,41 @@ export class DatabasePerformanceService {
   private generateRecommendations(
     slowQueries: QueryMetrics[],
     averageQueryTime: number,
-    dbStats: any
+    dbStats: any,
   ): string[] {
     const recommendations: string[] = [];
 
     // 慢查询建议
     if (slowQueries.length > 0) {
       recommendations.push(
-        `发现 ${slowQueries.length} 个慢查询，建议优化查询条件或添加索引`
+        `发现 ${slowQueries.length} 个慢查询，建议优化查询条件或添加索引`,
       );
     }
 
     // 平均查询时间建议
     if (averageQueryTime > 100) {
       recommendations.push(
-        `平均查询时间 ${averageQueryTime.toFixed(2)}ms 较高，建议优化数据库查询`
+        `平均查询时间 ${averageQueryTime.toFixed(2)}ms 较高，建议优化数据库查询`,
       );
     }
 
     // 索引使用建议
     const lowUsageIndexes = dbStats.indexes.filter(
-      (index: any) => index.scans < 100
+      (index: any) => index.scans < 100,
     );
     if (lowUsageIndexes.length > 0) {
       recommendations.push(
-        `发现 ${lowUsageIndexes.length} 个低使用率索引，考虑删除以提高写入性能`
+        `发现 ${lowUsageIndexes.length} 个低使用率索引，考虑删除以提高写入性能`,
       );
     }
 
     // 表统计建议
     const tablesWithDeadTuples = dbStats.tables.filter(
-      (table: any) => table.dead_tuples > 1000
+      (table: any) => table.dead_tuples > 1000,
     );
     if (tablesWithDeadTuples.length > 0) {
       recommendations.push(
-        `发现 ${tablesWithDeadTuples.length} 个表有大量死元组，建议执行 VACUUM`
+        `发现 ${tablesWithDeadTuples.length} 个表有大量死元组，建议执行 VACUUM`,
       );
     }
 
@@ -212,7 +214,7 @@ export class DatabasePerformanceService {
     }
 
     if (Array.isArray(data)) {
-      return data.map(item => this.convertBigIntToString(item));
+      return data.map((item) => this.convertBigIntToString(item));
     }
 
     if (typeof data === 'object') {
@@ -275,8 +277,10 @@ export class DatabasePerformanceService {
       return {
         unusedIndexes: this.convertBigIntToString(unusedIndexes),
         duplicateIndexes: this.convertBigIntToString(duplicateIndexes),
-        tablesBloat: this.convertBigIntToString((tablesBloat as any[]).filter((table: any) => table.bloat_ratio > 10)),
-        timestamp: new Date()
+        tablesBloat: this.convertBigIntToString(
+          (tablesBloat as any[]).filter((table: any) => table.bloat_ratio > 10),
+        ),
+        timestamp: new Date(),
       };
     } catch (error) {
       this.logger.error('获取优化建议失败:', error);
@@ -300,19 +304,25 @@ export class DatabasePerformanceService {
     const oneHourAgo = now - 60 * 60 * 1000;
 
     const recentQueries = this.queryMetrics.filter(
-      metric => metric.timestamp.getTime() > oneHourAgo
+      (metric) => metric.timestamp.getTime() > oneHourAgo,
     );
 
-    const queryByModel = recentQueries.reduce((acc, metric) => {
-      const key = `${metric.model || 'unknown'}.${metric.action || 'unknown'}`;
-      if (!acc[key]) {
-        acc[key] = { count: 0, totalDuration: 0, avgDuration: 0 };
-      }
-      acc[key].count++;
-      acc[key].totalDuration += metric.duration;
-      acc[key].avgDuration = acc[key].totalDuration / acc[key].count;
-      return acc;
-    }, {} as Record<string, { count: number; totalDuration: number; avgDuration: number }>);
+    const queryByModel = recentQueries.reduce(
+      (acc, metric) => {
+        const key = `${metric.model || 'unknown'}.${metric.action || 'unknown'}`;
+        if (!acc[key]) {
+          acc[key] = { count: 0, totalDuration: 0, avgDuration: 0 };
+        }
+        acc[key].count++;
+        acc[key].totalDuration += metric.duration;
+        acc[key].avgDuration = acc[key].totalDuration / acc[key].count;
+        return acc;
+      },
+      {} as Record<
+        string,
+        { count: number; totalDuration: number; avgDuration: number }
+      >,
+    );
 
     return {
       totalQueries: recentQueries.length,
@@ -320,7 +330,7 @@ export class DatabasePerformanceService {
       slowestQueries: recentQueries
         .sort((a, b) => b.duration - a.duration)
         .slice(0, 5),
-      timestamp: new Date()
+      timestamp: new Date(),
     };
   }
-} 
+}

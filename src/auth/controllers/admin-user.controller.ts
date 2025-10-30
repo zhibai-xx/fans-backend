@@ -8,7 +8,7 @@ import {
   Body,
   UseGuards,
   ParseIntPipe,
-  DefaultValuePipe
+  DefaultValuePipe,
 } from '@nestjs/common';
 import { UserService } from '../services/user.service';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
@@ -20,7 +20,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 @UseGuards(JwtAuthGuard, AdminRoleGuard)
 @ApiBearerAuth()
 export class AdminUserController {
-  constructor(private readonly userService: UserService) { }
+  constructor(private readonly userService: UserService) {}
 
   /**
    * 获取用户列表（分页 + 筛选）
@@ -44,18 +44,18 @@ export class AdminUserController {
         role: role === 'ALL' ? undefined : role,
         status: status === 'ALL' ? undefined : status,
         sortBy: sortBy || 'created_at',
-        sortOrder: sortOrder || 'desc'
+        sortOrder: sortOrder || 'desc',
       });
 
       return {
         success: true,
         data: result.data,
-        pagination: result.pagination
+        pagination: result.pagination,
       };
     } catch (error) {
       return {
         success: false,
-        message: error.message
+        message: error.message,
       };
     }
   }
@@ -71,12 +71,12 @@ export class AdminUserController {
 
       return {
         success: true,
-        data: user
+        data: user,
       };
     } catch (error) {
       return {
         success: false,
-        message: error.message
+        message: error.message,
       };
     }
   }
@@ -88,7 +88,7 @@ export class AdminUserController {
   @ApiOperation({ summary: '更新用户状态' })
   async updateUserStatus(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { status: 'ACTIVE' | 'SUSPENDED' }
+    @Body() body: { status: 'ACTIVE' | 'SUSPENDED' },
   ) {
     try {
       const user = await this.userService.updateUserStatus(id, body.status);
@@ -96,12 +96,12 @@ export class AdminUserController {
       return {
         success: true,
         data: user,
-        message: `用户状态已更新为${body.status === 'ACTIVE' ? '激活' : '暂停'}`
+        message: `用户状态已更新为${body.status === 'ACTIVE' ? '激活' : '暂停'}`,
       };
     } catch (error) {
       return {
         success: false,
-        message: error.message
+        message: error.message,
       };
     }
   }
@@ -113,7 +113,7 @@ export class AdminUserController {
   @ApiOperation({ summary: '更新用户角色' })
   async updateUserRole(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { role: 'USER' | 'ADMIN' }
+    @Body() body: { role: 'USER' | 'ADMIN' },
   ) {
     try {
       const user = await this.userService.updateUserRole(id, body.role);
@@ -121,12 +121,12 @@ export class AdminUserController {
       return {
         success: true,
         data: user,
-        message: `用户角色已更新为${body.role === 'ADMIN' ? '管理员' : '普通用户'}`
+        message: `用户角色已更新为${body.role === 'ADMIN' ? '管理员' : '普通用户'}`,
       };
     } catch (error) {
       return {
         success: false,
-        message: error.message
+        message: error.message,
       };
     }
   }
@@ -138,12 +138,13 @@ export class AdminUserController {
   @ApiOperation({ summary: '更新用户基本信息' })
   async updateUser(
     @Param('id', ParseIntPipe) id: number,
-    @Body() updateData: {
+    @Body()
+    updateData: {
       username?: string;
       email?: string;
       nickname?: string;
       phoneNumber?: string;
-    }
+    },
   ) {
     try {
       const user = await this.userService.updateUserByAdmin(id, updateData);
@@ -151,12 +152,12 @@ export class AdminUserController {
       return {
         success: true,
         data: user,
-        message: '用户信息更新成功'
+        message: '用户信息更新成功',
       };
     } catch (error) {
       return {
         success: false,
-        message: error.message
+        message: error.message,
       };
     }
   }
@@ -172,12 +173,12 @@ export class AdminUserController {
 
       return {
         success: true,
-        data: stats
+        data: stats,
       };
     } catch (error) {
       return {
         success: false,
-        message: error.message
+        message: error.message,
       };
     }
   }

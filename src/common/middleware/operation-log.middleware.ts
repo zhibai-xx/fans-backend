@@ -4,7 +4,7 @@ import { LogsService } from '../../logs/services/logs.service';
 
 @Injectable()
 export class OperationLogMiddleware implements NestMiddleware {
-  constructor(private readonly logsService: LogsService) { }
+  constructor(private readonly logsService: LogsService) {}
 
   use(req: Request, res: Response, next: NextFunction) {
     // 获取原始的 res.json 方法
@@ -59,14 +59,25 @@ function shouldLogOperation(req: Request): boolean {
   }
 
   // 包含用户重要操作
-  const importantPaths = ['/media', '/upload', '/user', '/favorite', '/comment'];
-  return importantPaths.some(importantPath => path.includes(importantPath));
+  const importantPaths = [
+    '/media',
+    '/upload',
+    '/user',
+    '/favorite',
+    '/comment',
+  ];
+  return importantPaths.some((importantPath) => path.includes(importantPath));
 }
 
 /**
  * 提取操作日志数据
  */
-function extractLogData(req: Request, res: Response, responseBody: any, user: any) {
+function extractLogData(
+  req: Request,
+  res: Response,
+  responseBody: any,
+  user: any,
+) {
   const method = req.method;
   const path = req.path;
   const statusCode = res.statusCode;
@@ -80,7 +91,8 @@ function extractLogData(req: Request, res: Response, responseBody: any, user: an
 
   if (statusCode >= 400) {
     result = 'FAILED';
-    error_message = responseBody?.message || responseBody?.error || `HTTP ${statusCode}`;
+    error_message =
+      responseBody?.message || responseBody?.error || `HTTP ${statusCode}`;
   } else if (statusCode >= 200 && statusCode < 300) {
     result = 'SUCCESS';
   } else {
@@ -115,7 +127,11 @@ function extractLogData(req: Request, res: Response, responseBody: any, user: an
  * 解析操作信息
  */
 function parseOperationInfo(method: string, path: string) {
-  let operation_type: 'USER_ACTION' | 'MEDIA_ACTION' | 'ADMIN_ACTION' | 'SYSTEM_ACTION' = 'USER_ACTION';
+  let operation_type:
+    | 'USER_ACTION'
+    | 'MEDIA_ACTION'
+    | 'ADMIN_ACTION'
+    | 'SYSTEM_ACTION' = 'USER_ACTION';
   let module = 'unknown';
   let action = method.toLowerCase();
   let target_type: string | undefined;
@@ -225,7 +241,9 @@ function getActionName(action: string): string {
 function getClientIp(req: Request): string {
   const forwarded = req.headers['x-forwarded-for'];
   const ip = forwarded
-    ? (Array.isArray(forwarded) ? forwarded[0] : forwarded.split(',')[0])
+    ? Array.isArray(forwarded)
+      ? forwarded[0]
+      : forwarded.split(',')[0]
     : req.connection.remoteAddress || req.socket.remoteAddress || 'unknown';
 
   return ip.replace(/^::ffff:/, ''); // 移除IPv6前缀

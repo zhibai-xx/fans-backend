@@ -15,4 +15,4 @@ export class ChangePasswordDto {
     message: '密码需包含大小写字母和数字',
   })
   newPassword: string;
-} 
+}

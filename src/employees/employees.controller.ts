@@ -1,14 +1,24 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, Ip } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  Query,
+  Ip,
+} from '@nestjs/common';
 import { EmployeesService } from './employees.service';
 import { Prisma } from '@prisma/client';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { MyLoggerService } from 'src/my-logger/my-logger.service';
 
-@SkipThrottle()  // 跳过整个控制器的默认限流设置
+@SkipThrottle() // 跳过整个控制器的默认限流设置
 @Controller('employees')
 export class EmployeesController {
-  constructor(private readonly employeesService: EmployeesService) { }
-  private readonly logger = new MyLoggerService(EmployeesController.name)  // 使用自定义日志服务
+  constructor(private readonly employeesService: EmployeesService) {}
+  private readonly logger = new MyLoggerService(EmployeesController.name); // 使用自定义日志服务
 
   /** 
   @Post()  // 处理POST /employees 请求，创建员工

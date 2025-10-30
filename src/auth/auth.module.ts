@@ -24,4 +24,4 @@ import { LogsModule } from 'src/logs/logs.module';
   providers: [UserService, AuthService, UserUuidService, JwtStrategy],
   exports: [UserService, AuthService, UserUuidService],
 })
-export class AuthModule { } 
+export class AuthModule {}

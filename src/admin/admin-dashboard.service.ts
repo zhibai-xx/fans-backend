@@ -70,19 +70,20 @@ export class AdminDashboardService {
     private readonly databaseService: DatabaseService,
     private readonly userService: UserService,
     private readonly mediaService: MediaService,
-  ) { }
+  ) {}
 
   /**
    * 获取管理面板统计数据
    */
   async getDashboardStats(): Promise<DashboardStats> {
     try {
-      const [userStats, mediaStats, operationStats, systemStats] = await Promise.all([
-        this.getUserStats(),
-        this.getMediaStats(),
-        this.getOperationStats(),
-        this.getSystemStats(),
-      ]);
+      const [userStats, mediaStats, operationStats, systemStats] =
+        await Promise.all([
+          this.getUserStats(),
+          this.getMediaStats(),
+          this.getOperationStats(),
+          this.getSystemStats(),
+        ]);
 
       return {
         users: userStats,
@@ -146,29 +147,26 @@ export class AdminDashboardService {
     thisWeek.setDate(thisWeek.getDate() - 7);
     thisWeek.setHours(0, 0, 0, 0);
 
-    const [
-      reviewsToday,
-      loginAttemptsToday,
-      failedLoginsToday
-    ] = await Promise.all([
-      this.databaseService.media.count({
-        where: {
-          updated_at: { gte: today },
-          status: { in: ['APPROVED', 'REJECTED'] }
-        }
-      }),
-      this.databaseService.user.count({
-        where: { created_at: { gte: today } }
-      }),
-      // 本地开发环境暂无登录日志系统
-      Promise.resolve(0)
-    ]);
+    const [reviewsToday, loginAttemptsToday, failedLoginsToday] =
+      await Promise.all([
+        this.databaseService.media.count({
+          where: {
+            updated_at: { gte: today },
+            status: { in: ['APPROVED', 'REJECTED'] },
+          },
+        }),
+        this.databaseService.user.count({
+          where: { created_at: { gte: today } },
+        }),
+        // 本地开发环境暂无登录日志系统
+        Promise.resolve(0),
+      ]);
 
     const thisWeekOperations = await this.databaseService.media.count({
       where: {
         updated_at: { gte: thisWeek },
-        status: { in: ['APPROVED', 'REJECTED'] }
-      }
+        status: { in: ['APPROVED', 'REJECTED'] },
+      },
     });
 
     return {
@@ -212,21 +210,24 @@ export class AdminDashboardService {
   /**
    * 获取真实磁盘使用情况
    */
-  private async getRealDiskUsage(): Promise<{ usedPercent: number, totalGB: number }> {
+  private async getRealDiskUsage(): Promise<{
+    usedPercent: number;
+    totalGB: number;
+  }> {
     try {
       const platform = os.platform();
 
       if (platform === 'darwin') {
         // macOS系统使用df命令
-        const command = "df -h / | tail -1";
+        const command = 'df -h / | tail -1';
         const { stdout } = await execAsync(command);
 
         // 解析df输出: "Filesystem     Size   Used  Avail Capacity iused ifree %iused  Mounted on"
         // "/dev/disk3s1s1  466Gi   15Gi  420Gi     4%  553233 4881965767    0%   /"
         const parts = stdout.trim().split(/\s+/);
         if (parts.length >= 5) {
-          const totalStr = parts[1];  // "466Gi"
-          const usedStr = parts[2];   // "15Gi"
+          const totalStr = parts[1]; // "466Gi"
+          const usedStr = parts[2]; // "15Gi"
           const capacityStr = parts[4]; // "4%"
 
           const usedPercent = parseInt(capacityStr.replace('%', ''));
@@ -234,12 +235,12 @@ export class AdminDashboardService {
 
           return {
             usedPercent,
-            totalGB
+            totalGB,
           };
         }
       } else if (platform === 'linux') {
         // Linux系统
-        const command = "df -h / | tail -1";
+        const command = 'df -h / | tail -1';
         const { stdout } = await execAsync(command);
         const parts = stdout.trim().split(/\s+/);
         if (parts.length >= 5) {
@@ -253,7 +254,6 @@ export class AdminDashboardService {
 
       // 后备方案：基于项目目录估算
       return this.getProjectSizeEstimate();
-
     } catch (error) {
       this.logger.warn('获取磁盘使用情况失败，使用估算值:', error.message);
       return this.getProjectSizeEstimate();
@@ -270,11 +270,23 @@ export class AdminDashboardService {
       const unit = match[2].toUpperCase();
 
       switch (unit) {
-        case 'K': case 'KI': size /= 1024 * 1024; break;
-        case 'M': case 'MI': size /= 1024; break;
-        case 'G': case 'GI': break; // 已经是GB
-        case 'T': case 'TI': size *= 1024; break;
-        default: size /= 1024 * 1024 * 1024; // 字节转GB
+        case 'K':
+        case 'KI':
+          size /= 1024 * 1024;
+          break;
+        case 'M':
+        case 'MI':
+          size /= 1024;
+          break;
+        case 'G':
+        case 'GI':
+          break; // 已经是GB
+        case 'T':
+        case 'TI':
+          size *= 1024;
+          break;
+        default:
+          size /= 1024 * 1024 * 1024; // 字节转GB
       }
 
       return Math.round(size);
@@ -285,7 +297,7 @@ export class AdminDashboardService {
   /**
    * 基于项目大小的估算
    */
-  private getProjectSizeEstimate(): { usedPercent: number, totalGB: number } {
+  private getProjectSizeEstimate(): { usedPercent: number; totalGB: number } {
     try {
       // 检查项目目录大小
       const projectPath = process.cwd();
@@ -297,7 +309,7 @@ export class AdminDashboardService {
       try {
         const frontendStats = this.getDirectorySize(projectPath);
         projectSize += frontendStats;
-      } catch (e) { }
+      } catch (e) {}
 
       // 估算后端项目大小
       try {
@@ -305,16 +317,19 @@ export class AdminDashboardService {
           const backendStats = this.getDirectorySize(backendPath);
           projectSize += backendStats;
         }
-      } catch (e) { }
+      } catch (e) {}
 
       // 基于项目大小估算磁盘情况
       const projectSizeGB = projectSize / (1024 * 1024 * 1024);
       const estimatedTotalGB = 500; // 本地开发环境通常的磁盘大小
-      const estimatedUsedPercent = Math.min((projectSizeGB / estimatedTotalGB) * 100 + 60, 95); // 基础使用率 + 项目占用
+      const estimatedUsedPercent = Math.min(
+        (projectSizeGB / estimatedTotalGB) * 100 + 60,
+        95,
+      ); // 基础使用率 + 项目占用
 
       return {
         usedPercent: Math.round(estimatedUsedPercent * 100) / 100,
-        totalGB: estimatedTotalGB
+        totalGB: estimatedTotalGB,
       };
     } catch (error) {
       return { usedPercent: 68.5, totalGB: 500 }; // 本地开发环境的合理估算
@@ -329,7 +344,8 @@ export class AdminDashboardService {
       let totalSize = 0;
       const files = fs.readdirSync(dirPath);
 
-      for (const file of files.slice(0, 100)) { // 限制检查文件数量避免性能问题
+      for (const file of files.slice(0, 100)) {
+        // 限制检查文件数量避免性能问题
         const filePath = `${dirPath}/${file}`;
         try {
           const stats = fs.statSync(filePath);
@@ -359,11 +375,7 @@ export class AdminDashboardService {
     }
 
     // 检查常见备份路径
-    const backupPaths = [
-      './backups',
-      './prisma/backups',
-      '/var/backups'
-    ];
+    const backupPaths = ['./backups', './prisma/backups', '/var/backups'];
 
     for (const path of backupPaths) {
       try {
@@ -390,25 +402,25 @@ export class AdminDashboardService {
       const recentReviews = await this.databaseService.media.findMany({
         where: {
           updated_at: {
-            gte: new Date(Date.now() - 24 * 60 * 60 * 1000)
+            gte: new Date(Date.now() - 24 * 60 * 60 * 1000),
           },
-          status: { in: ['APPROVED', 'REJECTED'] }
+          status: { in: ['APPROVED', 'REJECTED'] },
         },
         include: {
-          user: { select: { username: true } }
+          user: { select: { username: true } },
         },
         orderBy: { updated_at: 'desc' },
-        take: 5
+        take: 5,
       });
 
-      recentReviews.forEach(media => {
+      recentReviews.forEach((media) => {
         activities.push({
           id: media.id,
           type: 'media_review',
           title: `媒体内容${media.status === 'APPROVED' ? '通过' : '拒绝'}审核`,
           description: `${media.user?.username || '未知用户'} 的${media.media_type.toLowerCase()}内容`,
           timestamp: media.updated_at.toISOString(),
-          status: media.status === 'APPROVED' ? 'success' : 'warning'
+          status: media.status === 'APPROVED' ? 'success' : 'warning',
         });
       });
 
@@ -416,29 +428,31 @@ export class AdminDashboardService {
       const recentUsers = await this.databaseService.user.findMany({
         where: {
           created_at: {
-            gte: new Date(Date.now() - 24 * 60 * 60 * 1000)
-          }
+            gte: new Date(Date.now() - 24 * 60 * 60 * 1000),
+          },
         },
         orderBy: { created_at: 'desc' },
-        take: 3
+        take: 3,
       });
 
-      recentUsers.forEach(user => {
+      recentUsers.forEach((user) => {
         activities.push({
           id: user.id.toString(),
           type: 'user_register',
           title: '新用户注册',
           description: `用户 ${user.username} 已注册`,
           timestamp: user.created_at.toISOString(),
-          status: 'info'
+          status: 'info',
         });
       });
 
       // 按时间排序
-      return activities.sort((a, b) =>
-        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      ).slice(0, 10);
-
+      return activities
+        .sort(
+          (a, b) =>
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+        )
+        .slice(0, 10);
     } catch (error) {
       this.logger.error('获取近期活动失败', error.stack);
       return [];
@@ -467,7 +481,7 @@ export class AdminDashboardService {
         database: databaseStatus,
         storage: memoryUsage > 90 ? 'warning' : 'healthy',
         memory: memoryUsage > 85 ? 'warning' : 'healthy',
-        cpu: cpuUsage > 80 ? 'warning' : 'healthy'
+        cpu: cpuUsage > 80 ? 'warning' : 'healthy',
       };
     } catch (error) {
       this.logger.error('获取系统状态失败', error.stack);
@@ -475,7 +489,7 @@ export class AdminDashboardService {
         database: 'error',
         storage: 'error',
         memory: 'error',
-        cpu: 'error'
+        cpu: 'error',
       };
     }
   }
@@ -500,7 +514,9 @@ export class AdminDashboardService {
    */
   private formatTimeAgo(date: Date): string {
     const now = new Date();
-    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+    const diffInMinutes = Math.floor(
+      (now.getTime() - date.getTime()) / (1000 * 60),
+    );
 
     if (diffInMinutes < 1) return '刚刚';
     if (diffInMinutes < 60) return `${diffInMinutes}分钟前`;

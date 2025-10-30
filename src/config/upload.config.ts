@@ -8,7 +8,7 @@ export default () => ({
     maxSize: 1024 * 1024 * 100, // 100MB
     allowedTypes: ['image/jpeg', 'image/png', 'video/mp4'],
   },
-  
+
   // 阿里云OSS配置
   oss: {
     accessKeyId: process.env.OSS_ACCESS_KEY_ID,
@@ -17,5 +17,5 @@ export default () => ({
     region: process.env.OSS_REGION,
     endpoint: process.env.OSS_ENDPOINT,
     cdnBaseUrl: process.env.OSS_CDN_BASE_URL,
-  }
+  },
 });

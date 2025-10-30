@@ -3,7 +3,7 @@ import { DatabaseService } from 'src/database/database.service';
 
 @Injectable()
 export class UserUuidService {
-  constructor(private readonly databaseService: DatabaseService) { }
+  constructor(private readonly databaseService: DatabaseService) {}
 
   /**
    * 通过UUID获取用户内部ID
@@ -13,7 +13,7 @@ export class UserUuidService {
   async getInternalIdByUuid(uuid: string): Promise<number> {
     const user = await this.databaseService.user.findUnique({
       where: { uuid },
-      select: { id: true }
+      select: { id: true },
     });
 
     if (!user) {
@@ -31,7 +31,7 @@ export class UserUuidService {
   async getUuidByInternalId(id: number): Promise<string> {
     const user = await this.databaseService.user.findUnique({
       where: { id },
-      select: { uuid: true }
+      select: { uuid: true },
     });
 
     if (!user) {
@@ -49,11 +49,11 @@ export class UserUuidService {
   async getUuidMappingByIds(ids: number[]): Promise<Record<number, string>> {
     const users = await this.databaseService.user.findMany({
       where: { id: { in: ids } },
-      select: { id: true, uuid: true }
+      select: { id: true, uuid: true },
     });
 
     const mapping: Record<number, string> = {};
-    users.forEach(user => {
+    users.forEach((user) => {
       mapping[user.id] = user.uuid;
     });
 
@@ -65,17 +65,19 @@ export class UserUuidService {
    * @param uuids UUID数组
    * @returns UUID到内部ID的映射
    */
-  async getInternalIdMappingByUuids(uuids: string[]): Promise<Record<string, number>> {
+  async getInternalIdMappingByUuids(
+    uuids: string[],
+  ): Promise<Record<string, number>> {
     const users = await this.databaseService.user.findMany({
       where: { uuid: { in: uuids } },
-      select: { id: true, uuid: true }
+      select: { id: true, uuid: true },
     });
 
     const mapping: Record<string, number> = {};
-    users.forEach(user => {
+    users.forEach((user) => {
       mapping[user.uuid] = user.id;
     });
 
     return mapping;
   }
-} 
+}

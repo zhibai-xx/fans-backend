@@ -11,4 +11,4 @@ import { MediaModule } from '../media/media.module';
   providers: [AdminDashboardService],
   exports: [AdminDashboardService],
 })
-export class AdminDashboardModule { }
+export class AdminDashboardModule {}
