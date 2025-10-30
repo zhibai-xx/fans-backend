@@ -31,7 +31,9 @@ export class FileUtils {
    */
   static isVideo(filename: string): boolean {
     const ext = this.getExtension(filename);
-    return ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm'].includes(ext);
+    return ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm'].includes(
+      ext,
+    );
   }
 
   /**
@@ -63,7 +65,8 @@ export class FileUtils {
       'video/webm': '.webm',
       'application/pdf': '.pdf',
       'application/msword': '.doc',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+        '.docx',
     };
 
     return mimeMap[mimeType] || '.bin';
@@ -86,4 +89,4 @@ export class FileUtils {
 
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
   }
-} 
+}

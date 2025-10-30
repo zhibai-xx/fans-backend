@@ -15,12 +15,17 @@ import {
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { AdminRoleGuard } from '../../auth/guards/admin-role.guard';
 import { MediaService } from '../media.service';
-import { CreateTagDto, CreateCategoryDto, UpdateTagDto, UpdateCategoryDto } from '../dto/create-tag.dto';
+import {
+  CreateTagDto,
+  CreateCategoryDto,
+  UpdateTagDto,
+  UpdateCategoryDto,
+} from '../dto/create-tag.dto';
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, AdminRoleGuard)
 export class AdminTagCategoryController {
-  constructor(private readonly mediaService: MediaService) { }
+  constructor(private readonly mediaService: MediaService) {}
 
   // =====================================
   // 标签管理 API
@@ -75,7 +80,9 @@ export class AdminTagCategoryController {
       if (!updateTagDto.name) {
         throw new BadRequestException('标签名称不能为空');
       }
-      const tag = await this.mediaService.updateTag(id, { name: updateTagDto.name });
+      const tag = await this.mediaService.updateTag(id, {
+        name: updateTagDto.name,
+      });
       return {
         success: true,
         data: tag,
@@ -139,7 +146,8 @@ export class AdminTagCategoryController {
   @Get('categories')
   async getAllCategories(@Query('search') search?: string) {
     try {
-      const categories = await this.mediaService.getAllCategoriesWithStats(search);
+      const categories =
+        await this.mediaService.getAllCategoriesWithStats(search);
       return {
         success: true,
         data: categories,
@@ -159,7 +167,8 @@ export class AdminTagCategoryController {
   @HttpCode(HttpStatus.CREATED)
   async createCategory(@Body() createCategoryDto: CreateCategoryDto) {
     try {
-      const category = await this.mediaService.createCategory(createCategoryDto);
+      const category =
+        await this.mediaService.createCategory(createCategoryDto);
       return {
         success: true,
         data: category,
@@ -177,9 +186,15 @@ export class AdminTagCategoryController {
    * 更新分类
    */
   @Put('categories/:id')
-  async updateCategory(@Param('id') id: string, @Body() updateCategoryDto: UpdateCategoryDto) {
+  async updateCategory(
+    @Param('id') id: string,
+    @Body() updateCategoryDto: UpdateCategoryDto,
+  ) {
     try {
-      const category = await this.mediaService.updateCategory(id, updateCategoryDto);
+      const category = await this.mediaService.updateCategory(
+        id,
+        updateCategoryDto,
+      );
       return {
         success: true,
         data: category,

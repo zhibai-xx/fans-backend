@@ -26,7 +26,9 @@ export class OssStorageService implements IStorageService {
     });
 
     this.bucket = ossConfig.bucket;
-    this.cdnBaseUrl = ossConfig.cdnBaseUrl || `https://${ossConfig.bucket}.${ossConfig.endpoint}`;
+    this.cdnBaseUrl =
+      ossConfig.cdnBaseUrl ||
+      `https://${ossConfig.bucket}.${ossConfig.endpoint}`;
   }
 
   /**
@@ -35,7 +37,10 @@ export class OssStorageService implements IStorageService {
    * @param customPath 自定义路径
    * @returns 文件URL
    */
-  async uploadFile(file: Express.Multer.File, customPath?: string): Promise<string> {
+  async uploadFile(
+    file: Express.Multer.File,
+    customPath?: string,
+  ): Promise<string> {
     try {
       // 确定文件类型并选择合适的目录
       const isImage = file.mimetype.startsWith('image/');
@@ -110,7 +115,10 @@ export class OssStorageService implements IStorageService {
    * @param customPath 自定义路径
    * @returns 缩略图URL
    */
-  async generateThumbnail(file: Express.Multer.File, customPath?: string): Promise<string> {
+  async generateThumbnail(
+    file: Express.Multer.File,
+    customPath?: string,
+  ): Promise<string> {
     try {
       // 仅处理图片文件
       if (!file.mimetype.startsWith('image/')) {
@@ -170,4 +178,4 @@ export class OssStorageService implements IStorageService {
       return ''; // 返回空字符串代替null
     }
   }
-} 
+}

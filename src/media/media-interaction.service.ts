@@ -2,7 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-  ConflictException
+  ConflictException,
 } from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
 import { MyLoggerService } from 'src/my-logger/my-logger.service';
@@ -10,7 +10,7 @@ import {
   LikeStatusDto,
   MediaInteractionStatusDto,
   BatchLikeStatusDto,
-  BatchFavoriteStatusDto
+  BatchFavoriteStatusDto,
 } from './dto/like.dto';
 import { FavoriteStatusDto } from './dto/favorite.dto';
 
@@ -18,7 +18,7 @@ import { FavoriteStatusDto } from './dto/favorite.dto';
 export class MediaInteractionService {
   private readonly logger = new MyLoggerService(MediaInteractionService.name);
 
-  constructor(private readonly databaseService: DatabaseService) { }
+  constructor(private readonly databaseService: DatabaseService) {}
 
   // ===========================================
   // 点赞相关方法
@@ -269,7 +269,10 @@ export class MediaInteractionService {
   /**
    * 获取收藏状态
    */
-  async getFavoriteStatus(userId: number, mediaId: string): Promise<FavoriteStatusDto> {
+  async getFavoriteStatus(
+    userId: number,
+    mediaId: string,
+  ): Promise<FavoriteStatusDto> {
     try {
       // 检查是否已收藏
       const existingFavorite = await this.databaseService.favorite.findUnique({
@@ -332,7 +335,7 @@ export class MediaInteractionService {
       ]);
 
       return {
-        data: favorites.map(favorite => favorite.media),
+        data: favorites.map((favorite) => favorite.media),
         pagination: {
           page,
           limit,
@@ -355,7 +358,7 @@ export class MediaInteractionService {
    */
   async getMediaInteractionStatus(
     userId: number,
-    mediaId: string
+    mediaId: string,
   ): Promise<MediaInteractionStatusDto> {
     try {
       // 并行查询点赞和收藏状态
@@ -390,7 +393,7 @@ export class MediaInteractionService {
         !!like,
         !!favorite,
         media.likes_count,
-        media.favorites_count
+        media.favorites_count,
       );
     } catch (error) {
       this.logger.error(`获取媒体互动状态失败: ${error.message}`, error.stack);
@@ -403,7 +406,7 @@ export class MediaInteractionService {
    */
   async getBatchLikeStatus(
     userId: number,
-    mediaIds: string[]
+    mediaIds: string[],
   ): Promise<BatchLikeStatusDto> {
     try {
       const likes = await this.databaseService.like.findMany({
@@ -414,11 +417,14 @@ export class MediaInteractionService {
         select: { media_id: true },
       });
 
-      const likedMediaIds = new Set(likes.map(like => like.media_id));
-      const likesStatus = mediaIds.reduce((acc, mediaId) => {
-        acc[mediaId] = likedMediaIds.has(mediaId);
-        return acc;
-      }, {} as Record<string, boolean>);
+      const likedMediaIds = new Set(likes.map((like) => like.media_id));
+      const likesStatus = mediaIds.reduce(
+        (acc, mediaId) => {
+          acc[mediaId] = likedMediaIds.has(mediaId);
+          return acc;
+        },
+        {} as Record<string, boolean>,
+      );
 
       return new BatchLikeStatusDto(likesStatus);
     } catch (error) {
@@ -432,7 +438,7 @@ export class MediaInteractionService {
    */
   async getBatchFavoriteStatus(
     userId: number,
-    mediaIds: string[]
+    mediaIds: string[],
   ): Promise<BatchFavoriteStatusDto> {
     try {
       const favorites = await this.databaseService.favorite.findMany({
@@ -443,11 +449,16 @@ export class MediaInteractionService {
         select: { media_id: true },
       });
 
-      const favoritedMediaIds = new Set(favorites.map(favorite => favorite.media_id));
-      const favoritesStatus = mediaIds.reduce((acc, mediaId) => {
-        acc[mediaId] = favoritedMediaIds.has(mediaId);
-        return acc;
-      }, {} as Record<string, boolean>);
+      const favoritedMediaIds = new Set(
+        favorites.map((favorite) => favorite.media_id),
+      );
+      const favoritesStatus = mediaIds.reduce(
+        (acc, mediaId) => {
+          acc[mediaId] = favoritedMediaIds.has(mediaId);
+          return acc;
+        },
+        {} as Record<string, boolean>,
+      );
 
       return new BatchFavoriteStatusDto(favoritesStatus);
     } catch (error) {
@@ -497,26 +508,27 @@ export class MediaInteractionService {
    */
   async getUserInteractionStats(userId: number) {
     try {
-      const [likesCount, favoritesCount, receivedLikes, receivedFavorites] = await Promise.all([
-        // 用户发出的点赞数
-        this.databaseService.like.count({
-          where: { user_id: userId },
-        }),
-        // 用户发出的收藏数
-        this.databaseService.favorite.count({
-          where: { user_id: userId },
-        }),
-        // 用户作品获得的点赞数
-        this.databaseService.media.aggregate({
-          where: { user_id: userId },
-          _sum: { likes_count: true },
-        }),
-        // 用户作品获得的收藏数
-        this.databaseService.media.aggregate({
-          where: { user_id: userId },
-          _sum: { favorites_count: true },
-        }),
-      ]);
+      const [likesCount, favoritesCount, receivedLikes, receivedFavorites] =
+        await Promise.all([
+          // 用户发出的点赞数
+          this.databaseService.like.count({
+            where: { user_id: userId },
+          }),
+          // 用户发出的收藏数
+          this.databaseService.favorite.count({
+            where: { user_id: userId },
+          }),
+          // 用户作品获得的点赞数
+          this.databaseService.media.aggregate({
+            where: { user_id: userId },
+            _sum: { likes_count: true },
+          }),
+          // 用户作品获得的收藏数
+          this.databaseService.media.aggregate({
+            where: { user_id: userId },
+            _sum: { favorites_count: true },
+          }),
+        ]);
 
       return {
         given_likes: likesCount,

@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { FFmpegService, VideoQuality } from './ffmpeg.service';
+import { FFmpegService, VideoQuality, VideoMetadata } from './ffmpeg.service';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 
 /**
  * HLS服务 - 使用现代FFmpeg CLI实现HLS流媒体生成
- * 
+ *
  * 功能包括：
  * - 自适应码率流(ABR)生成
  * - 多分辨率HLS流
@@ -17,7 +17,7 @@ import * as fs from 'fs-extra';
 export class HlsService {
   private readonly logger = new Logger(HlsService.name);
 
-  constructor(private readonly ffmpegService: FFmpegService) { }
+  constructor(private readonly ffmpegService: FFmpegService) {}
 
   /**
    * 生成HLS自适应码率流
@@ -34,7 +34,9 @@ export class HlsService {
       targetQualities?: string[];
       enableEncryption?: boolean;
       cdnBaseUrl?: string;
-    } = {}
+      metadata?: VideoMetadata;
+      qualityConfigs?: VideoQuality[];
+    } = {},
   ): Promise<{
     masterPlaylist: string;
     qualities: Array<{
@@ -47,31 +49,48 @@ export class HlsService {
       segmentDuration = 10,
       targetQualities = ['1080p', '720p', '480p'],
       enableEncryption = false,
-      cdnBaseUrl = ''
+      cdnBaseUrl = '',
+      metadata,
+      qualityConfigs,
     } = options;
 
     this.logger.log(`开始生成自适应HLS流: ${inputPath} -> ${outputDir}`);
 
     // 获取视频元数据
-    const metadata = await this.ffmpegService.getVideoMetadata(inputPath);
-    this.logger.debug(`视频信息: ${metadata.width}x${metadata.height}, ${metadata.duration}s`);
-
-    // 获取可用的质量配置
-    const allQualities = this.ffmpegService.getAvailableQualities(metadata.width, metadata.height);
-    const selectedQualities = allQualities.filter(q =>
-      targetQualities.includes(q.name) || targetQualities.includes('all')
+    const metadataForUse =
+      metadata ?? (await this.ffmpegService.getVideoMetadata(inputPath));
+    this.logger.debug(
+      `视频信息: ${metadataForUse.width}x${metadataForUse.height}, ${metadataForUse.duration}s`,
     );
+
+    let selectedQualities: VideoQuality[] = [];
+    if (qualityConfigs && qualityConfigs.length > 0) {
+      selectedQualities = qualityConfigs;
+    } else {
+      const recommended =
+        this.ffmpegService.getRecommendedQualities(metadataForUse);
+      selectedQualities = recommended.filter(
+        (q) =>
+          targetQualities.includes(q.name) || targetQualities.includes('all'),
+      );
+    }
 
     if (selectedQualities.length === 0) {
       throw new Error('没有找到适合的视频质量配置');
     }
 
-    this.logger.debug(`将生成 ${selectedQualities.length} 种质量: ${selectedQualities.map(q => q.name).join(', ')}`);
+    this.logger.debug(
+      `将生成 ${selectedQualities.length} 种质量: ${selectedQualities.map((q) => q.name).join(', ')}`,
+    );
 
     // 确保输出目录存在
     await fs.ensureDir(outputDir);
 
-    const qualities: Array<{ quality: VideoQuality, playlistPath: string, segmentCount: number }> = [];
+    const qualities: Array<{
+      quality: VideoQuality;
+      playlistPath: string;
+      segmentCount: number;
+    }> = [];
 
     try {
       // 为每个质量生成HLS流
@@ -80,11 +99,12 @@ export class HlsService {
           inputPath,
           outputDir,
           quality,
+          metadataForUse,
           {
             segmentDuration,
             enableEncryption,
-            cdnBaseUrl
-          }
+            cdnBaseUrl,
+          },
         );
 
         qualities.push(qualityResult);
@@ -94,16 +114,17 @@ export class HlsService {
       const masterPlaylist = await this.generateMasterPlaylist(
         outputDir,
         qualities,
-        { cdnBaseUrl }
+        { cdnBaseUrl },
       );
 
-      this.logger.log(`HLS流生成完成: ${qualities.length} 种质量, 主播放列表: ${masterPlaylist}`);
+      this.logger.log(
+        `HLS流生成完成: ${qualities.length} 种质量, 主播放列表: ${masterPlaylist}`,
+      );
       return { masterPlaylist, qualities };
-
     } catch (error) {
       this.logger.error(`生成HLS流失败: ${error.message}`, error.stack);
       // 清理部分生成的文件
-      await this.cleanupPartialHLS(outputDir).catch(() => { });
+      await this.cleanupPartialHLS(outputDir).catch(() => {});
       throw error;
     }
   }
@@ -120,12 +141,17 @@ export class HlsService {
     inputPath: string,
     outputDir: string,
     quality: VideoQuality,
+    metadata: VideoMetadata,
     options: {
       segmentDuration: number;
       enableEncryption: boolean;
       cdnBaseUrl: string;
-    }
-  ): Promise<{ quality: VideoQuality, playlistPath: string, segmentCount: number }> {
+    },
+  ): Promise<{
+    quality: VideoQuality;
+    playlistPath: string;
+    segmentCount: number;
+  }> {
     const qualityDir = path.join(outputDir, quality.name);
     await fs.ensureDir(qualityDir);
 
@@ -136,19 +162,25 @@ export class HlsService {
 
     try {
       // 使用FFmpegService生成HLS（委托给更通用的方法）
-      await this.ffmpegService.generateHLS(inputPath, outputDir, [quality]);
+      await this.ffmpegService.generateHLS(
+        inputPath,
+        outputDir,
+        [quality],
+        metadata,
+      );
 
       // 计算分片数量
       const segmentCount = await this.countHLSSegments(qualityDir);
 
-      this.logger.debug(`${quality.name}质量HLS流生成完成: ${segmentCount} 个分片`);
+      this.logger.debug(
+        `${quality.name}质量HLS流生成完成: ${segmentCount} 个分片`,
+      );
 
       return {
         quality,
         playlistPath,
-        segmentCount
+        segmentCount,
       };
-
     } catch (error) {
       this.logger.error(`生成${quality.name}质量HLS流失败: ${error.message}`);
       throw error;
@@ -164,8 +196,12 @@ export class HlsService {
    */
   private async generateMasterPlaylist(
     outputDir: string,
-    qualities: Array<{ quality: VideoQuality, playlistPath: string, segmentCount: number }>,
-    options: { cdnBaseUrl?: string } = {}
+    qualities: Array<{
+      quality: VideoQuality;
+      playlistPath: string;
+      segmentCount: number;
+    }>,
+    options: { cdnBaseUrl?: string } = {},
   ): Promise<string> {
     const { cdnBaseUrl = '' } = options;
     const masterPlaylistPath = path.join(outputDir, 'master.m3u8');
@@ -174,7 +210,9 @@ export class HlsService {
     content += '#EXT-X-VERSION:6\n\n';
 
     // 按分辨率从高到低排序
-    const sortedQualities = qualities.sort((a, b) => b.quality.height - a.quality.height);
+    const sortedQualities = qualities.sort(
+      (a, b) => b.quality.height - a.quality.height,
+    );
 
     for (const { quality } of sortedQualities) {
       const bandwidth = this.calculateBandwidth(quality.bitrate);
@@ -204,7 +242,7 @@ export class HlsService {
   private async countHLSSegments(qualityDir: string): Promise<number> {
     try {
       const files = await fs.readdir(qualityDir);
-      return files.filter(file => file.endsWith('.ts')).length;
+      return files.filter((file) => file.endsWith('.ts')).length;
     } catch (error) {
       this.logger.warn(`统计HLS分片失败: ${error.message}`);
       return 0;
@@ -246,12 +284,14 @@ export class HlsService {
    * @param masterPlaylistPath 主播放列表路径
    * @returns Promise<{isValid: boolean, issues: string[]}>
    */
-  async validateHLS(masterPlaylistPath: string): Promise<{ isValid: boolean, issues: string[] }> {
+  async validateHLS(
+    masterPlaylistPath: string,
+  ): Promise<{ isValid: boolean; issues: string[] }> {
     const issues: string[] = [];
 
     try {
       // 检查主播放列表是否存在
-      if (!await fs.pathExists(masterPlaylistPath)) {
+      if (!(await fs.pathExists(masterPlaylistPath))) {
         issues.push('主播放列表文件不存在');
         return { isValid: false, issues };
       }
@@ -273,7 +313,7 @@ export class HlsService {
         if (!stat.isDirectory()) continue;
 
         const playlistPath = path.join(qualityPath, 'playlist.m3u8');
-        if (!await fs.pathExists(playlistPath)) {
+        if (!(await fs.pathExists(playlistPath))) {
           issues.push(`${qualityDir} 质量的播放列表缺失`);
           continue;
         }
@@ -286,10 +326,11 @@ export class HlsService {
       }
 
       const isValid = issues.length === 0;
-      this.logger.debug(`HLS验证完成: ${isValid ? '通过' : '失败'}, 问题数: ${issues.length}`);
+      this.logger.debug(
+        `HLS验证完成: ${isValid ? '通过' : '失败'}, 问题数: ${issues.length}`,
+      );
 
       return { isValid, issues };
-
     } catch (error) {
       this.logger.error(`HLS验证失败: ${error.message}`);
       issues.push(`验证过程出错: ${error.message}`);
@@ -303,12 +344,16 @@ export class HlsService {
    * @returns Promise<{qualities: Array<{name: string, resolution: string, bandwidth: number}>, totalSize: number}>
    */
   async getHLSInfo(masterPlaylistPath: string): Promise<{
-    qualities: Array<{ name: string, resolution: string, bandwidth: number }>;
+    qualities: Array<{ name: string; resolution: string; bandwidth: number }>;
     totalSize: number;
     duration: number;
   }> {
     const outputDir = path.dirname(masterPlaylistPath);
-    const qualities: Array<{ name: string, resolution: string, bandwidth: number }> = [];
+    const qualities: Array<{
+      name: string;
+      resolution: string;
+      bandwidth: number;
+    }> = [];
     let totalSize = 0;
     let duration = 0;
 
@@ -326,12 +371,14 @@ export class HlsService {
 
           const nextLine = lines[i + 1];
           if (nextLine && !nextLine.startsWith('#')) {
-            const qualityName = nameMatch ? nameMatch[1] : path.dirname(nextLine);
+            const qualityName = nameMatch
+              ? nameMatch[1]
+              : path.dirname(nextLine);
 
             qualities.push({
               name: qualityName,
               resolution: resolutionMatch ? resolutionMatch[1] : 'unknown',
-              bandwidth: bandwidthMatch ? parseInt(bandwidthMatch[1]) : 0
+              bandwidth: bandwidthMatch ? parseInt(bandwidthMatch[1]) : 0,
             });
           }
         }
@@ -365,8 +412,11 @@ export class HlsService {
 
         if (await fs.pathExists(firstPlaylist)) {
           const playlistContent = await fs.readFile(firstPlaylist, 'utf-8');
-          const targetDurationMatch = playlistContent.match(/#EXT-X-TARGETDURATION:(\d+)/);
-          const segmentCount = (playlistContent.match(/#EXTINF:/g) || []).length;
+          const targetDurationMatch = playlistContent.match(
+            /#EXT-X-TARGETDURATION:(\d+)/,
+          );
+          const segmentCount = (playlistContent.match(/#EXTINF:/g) || [])
+            .length;
 
           if (targetDurationMatch) {
             duration = parseInt(targetDurationMatch[1]) * segmentCount;
@@ -375,7 +425,6 @@ export class HlsService {
       }
 
       return { qualities, totalSize, duration };
-
     } catch (error) {
       this.logger.error(`获取HLS信息失败: ${error.message}`);
       return { qualities: [], totalSize: 0, duration: 0 };

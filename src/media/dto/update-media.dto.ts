@@ -1,4 +1,11 @@
-import { IsString, IsOptional, IsUUID, IsEnum, IsArray, ValidateIf } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsUUID,
+  IsEnum,
+  IsArray,
+  ValidateIf,
+} from 'class-validator';
 import { MediaType, MediaStatus } from '@prisma/client';
 import { Transform } from 'class-transformer';
 
@@ -55,4 +62,4 @@ export class UpdateMediaDto {
   @IsUUID(4, { each: true })
   @IsOptional()
   tag_ids?: string[];
-} 
+}

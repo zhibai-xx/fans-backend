@@ -34,8 +34,12 @@ export class MediaStatsDto {
     this.comments_count = data._count?.comments || 0;
 
     // 计算互动率
-    const totalInteractions = this.likes_count + this.favorites_count + this.comments_count;
-    this.engagement_rate = this.views > 0 ? Number((totalInteractions / this.views * 100).toFixed(2)) : 0;
+    const totalInteractions =
+      this.likes_count + this.favorites_count + this.comments_count;
+    this.engagement_rate =
+      this.views > 0
+        ? Number(((totalInteractions / this.views) * 100).toFixed(2))
+        : 0;
   }
 }
 
@@ -73,8 +77,12 @@ export class GlobalStatsDto {
     this.active_users = data.active_users || 0;
 
     // 计算平均互动率
-    const totalInteractions = this.total_likes + this.total_favorites + this.total_comments;
-    this.avg_engagement_rate = this.total_views > 0 ? Number((totalInteractions / this.total_views * 100).toFixed(2)) : 0;
+    const totalInteractions =
+      this.total_likes + this.total_favorites + this.total_comments;
+    this.avg_engagement_rate =
+      this.total_views > 0
+        ? Number(((totalInteractions / this.total_views) * 100).toFixed(2))
+        : 0;
   }
 }
 
@@ -110,8 +118,16 @@ export class UserStatsDto {
     this.user_uuid = userUuid;
     this.username = data.username;
     this.uploaded_media = data._count?.uploaded_media || 0;
-    this.received_likes = data.uploaded_media?.reduce((sum: number, media: any) => sum + (media.likes_count || 0), 0) || 0;
-    this.received_favorites = data.uploaded_media?.reduce((sum: number, media: any) => sum + (media.favorites_count || 0), 0) || 0;
+    this.received_likes =
+      data.uploaded_media?.reduce(
+        (sum: number, media: any) => sum + (media.likes_count || 0),
+        0,
+      ) || 0;
+    this.received_favorites =
+      data.uploaded_media?.reduce(
+        (sum: number, media: any) => sum + (media.favorites_count || 0),
+        0,
+      ) || 0;
     this.given_likes = data._count?.likes || 0;
     this.given_favorites = data._count?.favorites || 0;
     this.comments_count = data._count?.comments || 0;
@@ -154,13 +170,26 @@ export class PeriodStatsDto {
  * 统计查询参数DTO
  */
 export class StatsQueryDto {
-  @ApiProperty({ description: '开始日期', required: false, example: '2024-01-01' })
+  @ApiProperty({
+    description: '开始日期',
+    required: false,
+    example: '2024-01-01',
+  })
   start_date?: string;
 
-  @ApiProperty({ description: '结束日期', required: false, example: '2024-12-31' })
+  @ApiProperty({
+    description: '结束日期',
+    required: false,
+    example: '2024-12-31',
+  })
   end_date?: string;
 
-  @ApiProperty({ description: '统计类型', required: false, enum: ['daily', 'weekly', 'monthly'], default: 'daily' })
+  @ApiProperty({
+    description: '统计类型',
+    required: false,
+    enum: ['daily', 'weekly', 'monthly'],
+    default: 'daily',
+  })
   period?: 'daily' | 'weekly' | 'monthly' = 'daily';
 
   @ApiProperty({ description: '限制结果数量', required: false, default: 30 })

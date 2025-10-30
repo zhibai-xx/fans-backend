@@ -1,4 +1,12 @@
-import { IsString, IsOptional, IsArray, IsUUID, IsEnum, IsInt, Min } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsArray,
+  IsUUID,
+  IsEnum,
+  IsInt,
+  Min,
+} from 'class-validator';
 import { MediaStatus, MediaType } from '@prisma/client';
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
@@ -32,7 +40,10 @@ export class BatchUpdateTagsDto {
   @IsUUID(4, { each: true })
   tagIds: string[];
 
-  @ApiProperty({ description: '操作类型：add（添加）或replace（替换）', enum: ['add', 'replace'] })
+  @ApiProperty({
+    description: '操作类型：add（添加）或replace（替换）',
+    enum: ['add', 'replace'],
+  })
   @IsEnum(['add', 'replace'])
   action: 'add' | 'replace';
 }
@@ -82,12 +93,23 @@ export class ReviewFilterDto {
   @IsString()
   search?: string;
 
-  @ApiProperty({ description: '排序字段', enum: ['created_at', 'views', 'likes_count', 'size'], required: false, default: 'created_at' })
+  @ApiProperty({
+    description: '排序字段',
+    enum: ['created_at', 'views', 'likes_count', 'size'],
+    required: false,
+    default: 'created_at',
+  })
   @IsOptional()
   @IsString()
   @Transform(({ value }) => {
     // 只允许安全的排序字段，防止SQL注入
-    const allowedFields = ['created_at', 'views', 'likes_count', 'size', 'updated_at'];
+    const allowedFields = [
+      'created_at',
+      'views',
+      'likes_count',
+      'size',
+      'updated_at',
+    ];
     if (typeof value === 'string' && allowedFields.includes(value)) {
       return value;
     }
@@ -95,7 +117,12 @@ export class ReviewFilterDto {
   })
   sortBy?: string;
 
-  @ApiProperty({ description: '排序方向', enum: ['asc', 'desc'], required: false, default: 'desc' })
+  @ApiProperty({
+    description: '排序方向',
+    enum: ['asc', 'desc'],
+    required: false,
+    default: 'desc',
+  })
   @IsOptional()
   @IsString()
   @Transform(({ value }) => {
@@ -188,4 +215,4 @@ export class BatchOperationResultDto {
     this.failureIds = failureIds;
     this.errors = errors;
   }
-} 
+}

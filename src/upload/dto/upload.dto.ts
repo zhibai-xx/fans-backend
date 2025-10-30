@@ -1,4 +1,13 @@
-import { IsString, IsNumber, IsOptional, IsArray, IsEnum, IsUUID, IsNotEmpty, MinLength } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsOptional,
+  IsArray,
+  IsEnum,
+  IsUUID,
+  IsNotEmpty,
+  MinLength,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 
@@ -118,4 +127,4 @@ export class InitUploadResponse {
 
   @ApiProperty({ description: '媒体ID（秒传时返回）' })
   mediaId?: string;
-} 
+}

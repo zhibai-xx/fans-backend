@@ -45,14 +45,14 @@ export class UserUploadFiltersDto {
 }
 
 export class UserUploadStatsDto {
-  total: number;           // 总上传数
-  pending: number;         // 待审核
-  approved: number;        // 已通过
-  rejected: number;        // 已拒绝
-  private: number;         // 已暂存
-  total_views: number;     // 总浏览量
-  total_likes: number;     // 总点赞数
-  approval_rate: number;   // 通过率（百分比）
+  total: number; // 总上传数
+  pending: number; // 待审核
+  approved: number; // 已通过
+  rejected: number; // 已拒绝
+  private: number; // 已暂存
+  total_views: number; // 总浏览量
+  total_likes: number; // 总点赞数
+  approval_rate: number; // 通过率（百分比）
 }
 
 export class UserUploadRecordDto {
@@ -61,32 +61,35 @@ export class UserUploadRecordDto {
   description?: string;
   url: string;
   thumbnail_url?: string;
-  size: number;            // 文件大小（字节）
-  media_type: string;      // IMAGE | VIDEO
-  duration?: number;       // 视频时长（秒）
-  width?: number;          // 宽度
-  height?: number;         // 高度
-  status: string;          // 审核状态
+  size: number; // 文件大小（字节）
+  media_type: string; // IMAGE | VIDEO
+  duration?: number; // 视频时长（秒）
+  width?: number; // 宽度
+  height?: number; // 高度
+  status: string; // 审核状态
   review_comment?: string; // 审核备注
-  reviewed_by?: number;    // 审核员ID
-  reviewed_at?: Date;      // 审核时间
-  reviewer?: {             // 审核员信息
+  reviewed_by?: number; // 审核员ID
+  reviewed_at?: Date; // 审核时间
+  reviewer?: {
+    // 审核员信息
     id: number;
     username: string;
     nickname?: string;
   };
-  views: number;           // 浏览量
-  likes_count: number;     // 点赞数
-  category?: {             // 分类信息
+  views: number; // 浏览量
+  likes_count: number; // 点赞数
+  category?: {
+    // 分类信息
     id: string;
     name: string;
   };
-  tags: Array<{            // 标签信息
+  tags: Array<{
+    // 标签信息
     id: string;
     name: string;
   }>;
-  created_at: Date;        // 上传时间
-  updated_at: Date;        // 更新时间
+  created_at: Date; // 上传时间
+  updated_at: Date; // 更新时间
 }
 
 export class UserUploadListResponseDto {
@@ -96,4 +99,4 @@ export class UserUploadListResponseDto {
   limit: number;
   hasMore: boolean;
   stats: UserUploadStatsDto;
-} 
+}

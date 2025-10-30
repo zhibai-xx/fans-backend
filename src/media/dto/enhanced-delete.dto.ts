@@ -1,5 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsBoolean, IsOptional, IsString } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 
 export class EnhancedDeleteDto {
   @ApiProperty({ description: '媒体ID数组' })
@@ -33,9 +41,42 @@ export class SoftDeleteDto {
   @IsString()
   reason: string;
 
-  @ApiProperty({ description: '计划硬删除时间（天数）', required: false, default: 30 })
+  @ApiProperty({
+    description: '计划硬删除时间（天数）',
+    required: false,
+    default: 30,
+  })
   @IsOptional()
   scheduledDeletionDays?: number = 30;
+}
+
+export class CleanupRecycleBinDto {
+  @ApiProperty({
+    description: '本次清理的媒体数量上限',
+    required: false,
+    default: 20,
+    minimum: 1,
+    maximum: 200,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  limit?: number;
+
+  @ApiProperty({
+    description: '是否创建备份文件',
+    required: false,
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  createBackup?: boolean = false;
+
+  @ApiProperty({ description: '清理原因', required: false })
+  @IsOptional()
+  @IsString()
+  reason?: string;
 }
 
 export interface DeletionResult {
@@ -47,7 +88,10 @@ export interface DeletionResult {
     thumbnail: boolean;
     processedFiles: boolean;
     qualityFiles: number;
+    originalFile: boolean;
+    extraFiles: number;
   };
+  spaceFreed: number;
   backupCreated?: boolean;
   error?: string;
 }

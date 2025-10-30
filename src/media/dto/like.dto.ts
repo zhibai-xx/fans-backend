@@ -10,7 +10,10 @@ export class CreateLikeDto {
    * 媒体ID
    * @example "123e4567-e89b-12d3-a456-426614174000"
    */
-  @ApiProperty({ description: '媒体ID', example: '123e4567-e89b-12d3-a456-426614174000' })
+  @ApiProperty({
+    description: '媒体ID',
+    example: '123e4567-e89b-12d3-a456-426614174000',
+  })
   @IsUUID()
   @IsNotEmpty()
   media_id: string;
@@ -30,7 +33,9 @@ export class LikeResponseDto {
   user_uuid: string;
 
   @ApiProperty({ description: '点赞时间' })
-  @Transform(({ value }) => value ? new Date(value).toISOString() : new Date().toISOString())
+  @Transform(({ value }) =>
+    value ? new Date(value).toISOString() : new Date().toISOString(),
+  )
   created_at: string;
 
   constructor(like: any, userUuid: string) {
@@ -73,7 +78,12 @@ export class MediaInteractionStatusDto {
   @ApiProperty({ description: '收藏总数' })
   favorites_count: number;
 
-  constructor(is_liked: boolean, is_favorited: boolean, likes_count: number, favorites_count: number) {
+  constructor(
+    is_liked: boolean,
+    is_favorited: boolean,
+    likes_count: number,
+    favorites_count: number,
+  ) {
     this.is_liked = is_liked;
     this.is_favorited = is_favorited;
     this.likes_count = likes_count;
@@ -89,7 +99,7 @@ export class BatchLikeStatusDto {
     description: '媒体ID与点赞状态的映射',
     type: 'object',
     additionalProperties: { type: 'boolean' },
-    example: { 'media-id-1': true, 'media-id-2': false }
+    example: { 'media-id-1': true, 'media-id-2': false },
   })
   likes_status: Record<string, boolean>;
 
@@ -106,7 +116,7 @@ export class BatchFavoriteStatusDto {
     description: '媒体ID与收藏状态的映射',
     type: 'object',
     additionalProperties: { type: 'boolean' },
-    example: { 'media-id-1': true, 'media-id-2': false }
+    example: { 'media-id-1': true, 'media-id-2': false },
   })
   favorites_status: Record<string, boolean>;
 

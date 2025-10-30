@@ -17,7 +17,16 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { AdminRoleGuard } from '../../auth/guards/admin-role.guard';
 import { MediaService } from '../media.service';
 import { MediaType, MediaStatus } from '@prisma/client';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
+import {
+  EnhancedDeleteDto,
+  CleanupRecycleBinDto,
+} from '../dto/enhanced-delete.dto';
 
 interface MediaFilters {
   visibility?: 'VISIBLE' | 'HIDDEN';
@@ -36,6 +45,8 @@ interface BatchVisibilityUpdateDto {
 
 interface BatchDeleteDto {
   mediaIds: string[];
+  reason?: string;
+  cleanupDelayDays?: number;
 }
 
 @ApiTags('管理员-媒体管理')
@@ -43,7 +54,7 @@ interface BatchDeleteDto {
 @UseGuards(JwtAuthGuard, AdminRoleGuard)
 @ApiBearerAuth()
 export class AdminMediaController {
-  constructor(private readonly mediaService: MediaService) { }
+  constructor(private readonly mediaService: MediaService) {}
 
   /**
    * 获取所有媒体内容（管理员专用）
@@ -72,7 +83,11 @@ export class AdminMediaController {
         user_id,
       };
 
-      const result = await this.mediaService.getAllMediaForAdmin(filters, page, limit);
+      const result = await this.mediaService.getAllMediaForAdmin(
+        filters,
+        page,
+        limit,
+      );
 
       return {
         success: true,
@@ -139,12 +154,12 @@ export class AdminMediaController {
   @ApiOperation({ summary: '更新媒体显示状态（单个）' })
   async updateMediaVisibility(
     @Param('id') id: string,
-    @Body() body: { visibility: 'VISIBLE' | 'HIDDEN' }
+    @Body() body: { visibility: 'VISIBLE' | 'HIDDEN' },
   ) {
     try {
       const media = await this.mediaService.updateMediaVisibilityForAdmin(
         id,
-        body.visibility
+        body.visibility,
       );
       return {
         success: true,
@@ -167,7 +182,7 @@ export class AdminMediaController {
     try {
       const result = await this.mediaService.batchUpdateMediaVisibility(
         body.mediaIds,
-        body.visibility
+        body.visibility,
       );
       return {
         success: true,
@@ -188,15 +203,19 @@ export class AdminMediaController {
   @ApiOperation({ summary: '更新媒体信息' })
   async updateMediaInfo(
     @Param('id') id: string,
-    @Body() updateData: {
+    @Body()
+    updateData: {
       title?: string;
       description?: string;
       category_id?: string;
       tag_ids?: string[];
-    }
+    },
   ) {
     try {
-      const result = await this.mediaService.updateMediaInfoForAdmin(id, updateData);
+      const result = await this.mediaService.updateMediaInfoForAdmin(
+        id,
+        updateData,
+      );
       return {
         success: true,
         data: result,
@@ -215,13 +234,25 @@ export class AdminMediaController {
    */
   @Delete(':id')
   @ApiOperation({ summary: '删除单个媒体' })
-  async deleteMedia(@Request() req, @Param('id') id: string) {
+  async deleteMedia(
+    @Request() req,
+    @Param('id') id: string,
+    @Query('reason') reason?: string,
+    @Query('cleanupDelayDays', new ParseIntPipe({ optional: true }))
+    cleanupDelayDays?: number,
+  ) {
     try {
       const adminId = req.user.id;
-      await this.mediaService.batchDeleteMedia([id], adminId);
+      const result = await this.mediaService.softDeleteMedia(
+        id,
+        adminId,
+        reason ?? '管理员删除',
+        cleanupDelayDays,
+      );
       return {
         success: true,
-        message: '删除成功',
+        message: '媒体已移动至回收站',
+        data: result,
       };
     } catch (error) {
       return {
@@ -239,7 +270,11 @@ export class AdminMediaController {
   async batchDeleteMedia(@Request() req, @Body() body: BatchDeleteDto) {
     try {
       const adminId = req.user.id;
-      const result = await this.mediaService.batchDeleteMedia(body.mediaIds, adminId);
+      const result = await this.mediaService.batchDeleteMedia(
+        body.mediaIds,
+        adminId,
+        body.reason,
+      );
       return {
         success: true,
         data: result,
@@ -260,10 +295,149 @@ export class AdminMediaController {
   async batchDeleteMediaPost(@Request() req, @Body() body: BatchDeleteDto) {
     try {
       const adminId = req.user.id;
-      const result = await this.mediaService.batchDeleteMedia(body.mediaIds, adminId);
+      const result = await this.mediaService.batchDeleteMedia(
+        body.mediaIds,
+        adminId,
+        body.reason,
+      );
       return {
         success: true,
         data: result,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  @Get('recycle/bin')
+  @ApiOperation({ summary: '回收站列表' })
+  async getRecycleBin(
+    @Query('page', new ParseIntPipe({ optional: true })) page = 1,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit = 20,
+    @Query('search') search?: string,
+  ) {
+    try {
+      const result = await this.mediaService.getRecycleBinItems(
+        page,
+        limit,
+        search,
+      );
+      return {
+        success: true,
+        data: result.data,
+        pagination: result.pagination,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  @Post('recycle/restore')
+  @ApiOperation({ summary: '恢复回收站媒体' })
+  async restoreMedia(@Request() req, @Body() body: BatchDeleteDto) {
+    try {
+      const adminId = req.user.id;
+      const result = await this.mediaService.restoreMedia(
+        body.mediaIds,
+        adminId,
+      );
+      return {
+        success: true,
+        data: result,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  /**
+   * 彻底删除回收站媒体
+   */
+  @Post('recycle/hard-delete')
+  @ApiOperation({ summary: '彻底删除回收站媒体' })
+  async hardDeleteMedia(
+    @Request() req,
+    @Body() body: EnhancedDeleteDto,
+  ) {
+    try {
+      const adminId = req.user.id;
+      const result = await this.mediaService.hardDeleteMedia(
+        body.mediaIds,
+        adminId,
+        {
+          reason: body.reason,
+          createBackup: body.createBackup,
+          forceDelete: body.forceDelete,
+        },
+      );
+      return {
+        success: true,
+        data: result,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  /**
+   * 手动执行回收站清理任务
+   */
+  @Post('recycle/cleanup')
+  @ApiOperation({ summary: '执行回收站清理任务' })
+  async cleanupRecycleBin(
+    @Request() req,
+    @Body() body: CleanupRecycleBinDto,
+  ) {
+    try {
+      const adminId = req.user.id;
+      const result = await this.mediaService.cleanupRecycleBin({
+        limit: body.limit,
+        reason: body.reason,
+        createBackup: body.createBackup,
+        operatorId: adminId,
+      });
+
+      return {
+        success: true,
+        data: result,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  /**
+   * 获取待清理媒体列表
+   */
+  @Get('recycle/pending')
+  @ApiOperation({ summary: '获取待清理媒体列表' })
+  async getPendingCleanup(
+    @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 50,
+  ) {
+    try {
+      const result = await this.mediaService.getPendingCleanupMedia(limit);
+      return {
+        success: true,
+        data: result.items,
+        pagination: {
+          limit,
+          total: result.total,
+        },
       };
     } catch (error) {
       return {
@@ -280,7 +454,7 @@ export class AdminMediaController {
   @ApiOperation({ summary: '获取用户上传统计' })
   async getUserUploadStats(
     @Query('page', new ParseIntPipe({ optional: true })) page: number = 1,
-    @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 20
+    @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 20,
   ) {
     try {
       const result = await this.mediaService.getAllUserUploadStats();

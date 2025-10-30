@@ -10,8 +10,16 @@ import {
   HttpStatus,
   HttpCode,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-import { VideoProcessingService, VideoProcessingJob } from '../services/video-processing.service';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
+import {
+  VideoProcessingService,
+  VideoProcessingJob,
+} from '../services/video-processing.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { AdminRoleGuard } from '../../auth/guards/admin-role.guard';
 import { MyLoggerService } from '../../my-logger/my-logger.service';
@@ -52,7 +60,7 @@ export class JobStatusResponseDto {
 export class VideoProcessingController {
   private readonly logger = new MyLoggerService(VideoProcessingController.name);
 
-  constructor(private videoProcessingService: VideoProcessingService) { }
+  constructor(private videoProcessingService: VideoProcessingService) {}
 
   /**
    * 提交视频处理任务
@@ -108,7 +116,9 @@ export class VideoProcessingController {
     type: JobStatusResponseDto,
   })
   @ApiResponse({ status: 404, description: '任务不存在' })
-  async getJobStatus(@Param('jobId') jobId: string): Promise<JobStatusResponseDto> {
+  async getJobStatus(
+    @Param('jobId') jobId: string,
+  ): Promise<JobStatusResponseDto> {
     this.logger.log(`获取任务状态: ${jobId}`);
 
     const status = await this.videoProcessingService.getJobStatus(jobId);
@@ -297,7 +307,9 @@ export class VideoProcessingController {
     @Query('limit') limit: number = 20,
     @Query('offset') offset: number = 0,
   ) {
-    this.logger.log(`获取任务列表: status=${status}, limit=${limit}, offset=${offset}`);
+    this.logger.log(
+      `获取任务列表: status=${status}, limit=${limit}, offset=${offset}`,
+    );
 
     // 实际实现需要查询队列中的任务
     // 这里提供基础响应结构
@@ -375,4 +387,3 @@ export class VideoProcessingController {
     };
   }
 }
-

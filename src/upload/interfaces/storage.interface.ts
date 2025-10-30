@@ -24,5 +24,8 @@ export interface IStorageService {
    * @param originalUrl 原始文件的URL
    * @returns 缩略图URL
    */
-  generateThumbnail?(file: Express.Multer.File, originalUrl?: string): Promise<string>;
-} 
+  generateThumbnail?(
+    file: Express.Multer.File,
+    originalUrl?: string,
+  ): Promise<string>;
+}

@@ -1,5 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsUUID, IsNotEmpty, IsOptional, IsNumber, Min, Max } from 'class-validator';
+import {
+  IsUUID,
+  IsNotEmpty,
+  IsOptional,
+  IsNumber,
+  Min,
+  Max,
+} from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
 /**
@@ -10,7 +17,10 @@ export class CreateFavoriteDto {
    * 媒体ID
    * @example "123e4567-e89b-12d3-a456-426614174000"
    */
-  @ApiProperty({ description: '媒体ID', example: '123e4567-e89b-12d3-a456-426614174000' })
+  @ApiProperty({
+    description: '媒体ID',
+    example: '123e4567-e89b-12d3-a456-426614174000',
+  })
   @IsUUID()
   @IsNotEmpty()
   media_id: string;
@@ -30,7 +40,9 @@ export class FavoriteResponseDto {
   user_uuid: string;
 
   @ApiProperty({ description: '收藏时间' })
-  @Transform(({ value }) => value ? new Date(value).toISOString() : new Date().toISOString())
+  @Transform(({ value }) =>
+    value ? new Date(value).toISOString() : new Date().toISOString(),
+  )
   created_at: string;
 
   constructor(favorite: any, userUuid: string) {

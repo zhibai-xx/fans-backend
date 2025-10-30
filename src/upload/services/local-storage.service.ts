@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IStorageService } from '../interfaces/storage.interface';
 import * as fs from 'fs';
@@ -11,11 +11,17 @@ import { v4 as uuidv4 } from 'uuid';
 export class LocalStorageService implements IStorageService {
   private readonly uploadDir: string;
   private readonly thumbnailDir: string;
+  private readonly absoluteUploadDir: string;
+  private readonly absoluteThumbnailDir: string;
+  private readonly logger = new Logger(LocalStorageService.name);
 
   constructor(private configService: ConfigService) {
     // 获取上传目录配置
-    this.uploadDir = this.configService.get<string>('UPLOAD_DIR') || './uploads';
+    this.uploadDir =
+      this.configService.get<string>('UPLOAD_DIR') || './uploads';
     this.thumbnailDir = path.join(this.uploadDir, 'thumbnails');
+    this.absoluteUploadDir = path.resolve(this.uploadDir);
+    this.absoluteThumbnailDir = path.resolve(this.thumbnailDir);
 
     // 确保目录存在
     this.ensureDirectoryExists(this.uploadDir);
@@ -28,19 +34,22 @@ export class LocalStorageService implements IStorageService {
    */
   private async ensureDirectoryExists(directory: string): Promise<void> {
     try {
-      await fsPromises.access(directory, fs.constants.F_OK);
+      await fsPromises.access(path.resolve(directory), fs.constants.F_OK);
     } catch (error) {
-      await fsPromises.mkdir(directory, { recursive: true });
+      await fsPromises.mkdir(path.resolve(directory), { recursive: true });
     }
   }
 
   /**
    * 上传文件到本地存储
-   * @param file 文件对象 
+   * @param file 文件对象
    * @param customPath 自定义路径
    * @returns 文件URL
    */
-  async uploadFile(file: Express.Multer.File, customPath?: string): Promise<string> {
+  async uploadFile(
+    file: Express.Multer.File,
+    customPath?: string,
+  ): Promise<string> {
     // 确定存储目录
     const directory = customPath
       ? path.join(this.uploadDir, customPath)
@@ -71,9 +80,11 @@ export class LocalStorageService implements IStorageService {
    */
   async deleteFile(fileUrl: string): Promise<boolean> {
     try {
-      // 从URL中提取文件路径
-      const urlPath = fileUrl.replace('/api/upload/file/', '');
-      const filePath = path.join(this.uploadDir, urlPath);
+      const filePath = this.resolveLocalFilePath(fileUrl);
+      if (!filePath) {
+        this.logger.warn(`本地删除失败，无法解析路径: ${fileUrl}`);
+        return false;
+      }
 
       // 检查文件是否存在
       await fsPromises.access(filePath, fs.constants.F_OK);
@@ -82,7 +93,10 @@ export class LocalStorageService implements IStorageService {
       await fsPromises.unlink(filePath);
 
       // 检查是否有对应的缩略图
-      const thumbnailPath = path.join(this.thumbnailDir, path.basename(filePath));
+      const thumbnailPath = path.join(
+        this.absoluteThumbnailDir,
+        path.basename(filePath),
+      );
       try {
         await fsPromises.access(thumbnailPath, fs.constants.F_OK);
         await fsPromises.unlink(thumbnailPath);
@@ -92,7 +106,7 @@ export class LocalStorageService implements IStorageService {
 
       return true;
     } catch (error) {
-      console.error('删除文件失败:', error);
+      this.logger.error(`删除本地文件失败: ${error.message}`, error.stack);
       return false;
     }
   }
@@ -103,7 +117,10 @@ export class LocalStorageService implements IStorageService {
    * @param originalUrl 原始图片的URL
    * @returns 缩略图URL
    */
-  async generateThumbnail(file: Express.Multer.File, originalUrl?: string): Promise<string> {
+  async generateThumbnail(
+    file: Express.Multer.File,
+    originalUrl?: string,
+  ): Promise<string> {
     try {
       // 仅处理图片文件
       if (!file.mimetype.startsWith('image/')) {
@@ -137,8 +154,50 @@ export class LocalStorageService implements IStorageService {
       // 返回缩略图URL
       return `/api/upload/file/${relativePath.replace(/\\/g, '/')}`;
     } catch (error) {
-      console.error('生成缩略图失败:', error);
+      this.logger.error(`生成缩略图失败: ${error.message}`, error.stack);
       return '';
     }
   }
-} 
+
+  private resolveLocalFilePath(fileUrl: string): string | null {
+    if (!fileUrl) {
+      return null;
+    }
+
+    let normalized = fileUrl.trim();
+    if (!normalized) {
+      return null;
+    }
+
+    try {
+      const parsed = new URL(normalized, 'http://localhost');
+      normalized = parsed.pathname || normalized;
+    } catch {
+      // 非绝对URL，忽略
+    }
+
+    normalized = decodeURIComponent(normalized);
+    normalized = normalized.replace(/^\/+/, '');
+
+    if (normalized.startsWith('api/upload/file/')) {
+      normalized = normalized.substring('api/upload/file/'.length);
+    } else if (normalized.startsWith('/api/upload/file/')) {
+      normalized = normalized.substring('/api/upload/file/'.length);
+    }
+
+    if (normalized.startsWith('uploads/')) {
+      normalized = normalized.substring('uploads/'.length);
+    }
+
+    const resolvedPath = path.resolve(this.absoluteUploadDir, normalized);
+
+    if (!resolvedPath.startsWith(this.absoluteUploadDir)) {
+      this.logger.warn(
+        `拒绝删除上传目录之外的文件: ${resolvedPath} (来源: ${fileUrl})`,
+      );
+      return null;
+    }
+
+    return resolvedPath;
+  }
+}

@@ -9,7 +9,7 @@ export class CreateTagDto {
   @ApiProperty({
     description: '标签名称',
     example: '演唱会',
-    maxLength: 30
+    maxLength: 30,
   })
   @IsString()
   @IsNotEmpty()
@@ -17,7 +17,7 @@ export class CreateTagDto {
   name: string;
 }
 
-export class UpdateTagDto extends PartialType(CreateTagDto) { }
+export class UpdateTagDto extends PartialType(CreateTagDto) {}
 
 export class CreateCategoryDto {
   /**
@@ -27,7 +27,7 @@ export class CreateCategoryDto {
   @ApiProperty({
     description: '分类名称',
     example: '舞台表演',
-    maxLength: 50
+    maxLength: 50,
   })
   @IsString()
   @IsNotEmpty()
@@ -42,7 +42,7 @@ export class CreateCategoryDto {
     description: '分类描述',
     example: '演唱会、音乐节等舞台表演的照片和视频',
     maxLength: 200,
-    required: false
+    required: false,
   })
   @IsString()
   @IsOptional()
@@ -50,4 +50,4 @@ export class CreateCategoryDto {
   description?: string;
 }
 
-export class UpdateCategoryDto extends PartialType(CreateCategoryDto) { } 
+export class UpdateCategoryDto extends PartialType(CreateCategoryDto) {}

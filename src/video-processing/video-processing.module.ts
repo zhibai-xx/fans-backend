@@ -60,4 +60,4 @@ import { MyLoggerModule } from '../my-logger/my-logger.module';
   ],
   exports: [VideoProcessingService, ThumbnailService],
 })
-export class VideoProcessingModule { }
+export class VideoProcessingModule {}

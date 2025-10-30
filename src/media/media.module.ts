@@ -1,4 +1,5 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
 import { MediaController } from './media.controller';
 import { UserUploadController } from './controllers/user-upload.controller';
 import { AdminTagCategoryController } from './controllers/admin-tag-category.controller';
@@ -14,6 +15,9 @@ import { MyLoggerModule } from 'src/my-logger/my-logger.module';
 import { LogsModule } from 'src/logs/logs.module';
 import { VideoProcessingModule } from 'src/video-processing/video-processing.module';
 import { UploadModule } from 'src/upload/upload.module';
+import { EnhancedDeletionService } from './services/enhanced-deletion.service';
+import { MediaCleanupScheduler } from './services/media-cleanup.scheduler';
+import { MediaCleanupProcessor } from './processors/media-cleanup.processor';
 
 @Module({
   imports: [
@@ -24,9 +28,25 @@ import { UploadModule } from 'src/upload/upload.module';
     LogsModule,
     VideoProcessingModule,
     forwardRef(() => UploadModule),
+    BullModule.registerQueue({
+      name: 'media-cleanup',
+    }),
   ],
-  controllers: [MediaController, UserUploadController, AdminTagCategoryController, AdminMediaController, AdminLogsController, MediaInteractionController],
-  providers: [MediaService, MediaInteractionService],
-  exports: [MediaService, MediaInteractionService],
+  controllers: [
+    MediaController,
+    UserUploadController,
+    AdminTagCategoryController,
+    AdminMediaController,
+    AdminLogsController,
+    MediaInteractionController,
+  ],
+  providers: [
+    MediaService,
+    MediaInteractionService,
+    EnhancedDeletionService,
+    MediaCleanupScheduler,
+    MediaCleanupProcessor,
+  ],
+  exports: [MediaService, MediaInteractionService, EnhancedDeletionService],
 })
-export class MediaModule { }
+export class MediaModule {}

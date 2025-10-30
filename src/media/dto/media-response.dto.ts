@@ -98,25 +98,39 @@ export class MediaResponseDto {
   @ApiProperty({ description: '媒体来源' })
   source: string;
 
-  @ApiProperty({ description: '原始创建时间（微博发布时间等）', required: false })
-  @Transform(({ value }) => value ? new Date(value).toISOString() : null)
+  @ApiProperty({ description: '原始素材URL', required: false })
+  original_file_url?: string;
+
+  @ApiProperty({
+    description: '原始创建时间（微博发布时间等）',
+    required: false,
+  })
+  @Transform(({ value }) => (value ? new Date(value).toISOString() : null))
   original_created_at?: Date;
 
   @ApiProperty({ description: '来源相关元数据', required: false })
   source_metadata?: any;
 
   @ApiProperty({ description: '创建时间' })
-  @Transform(({ value }) => value ? new Date(value).toISOString() : new Date().toISOString())
+  @Transform(({ value }) =>
+    value ? new Date(value).toISOString() : new Date().toISOString(),
+  )
   created_at: string;
 
   @ApiProperty({ description: '更新时间' })
-  @Transform(({ value }) => value ? new Date(value).toISOString() : new Date().toISOString())
+  @Transform(({ value }) =>
+    value ? new Date(value).toISOString() : new Date().toISOString(),
+  )
   updated_at: string;
 
   @ApiProperty({ description: '用户信息', type: MediaUserDto })
   user: MediaUserDto;
 
-  @ApiProperty({ description: '分类信息', type: MediaCategoryDto, required: false })
+  @ApiProperty({
+    description: '分类信息',
+    type: MediaCategoryDto,
+    required: false,
+  })
   category?: MediaCategoryDto;
 
   @ApiProperty({ description: '标签列表', type: [MediaTagDto] })
@@ -130,7 +144,11 @@ export class MediaResponseDto {
     };
   }>;
 
-  @ApiProperty({ description: '视频质量列表（仅视频类型有效）', type: [VideoQualityDto], required: false })
+  @ApiProperty({
+    description: '视频质量列表（仅视频类型有效）',
+    type: [VideoQualityDto],
+    required: false,
+  })
   video_qualities?: VideoQualityDto[];
 
   constructor(media: any, userUuid: string) {
@@ -140,7 +158,9 @@ export class MediaResponseDto {
 
     // 修复URL路径 - 转换为完整的可访问URL
     this.url = this.convertToAccessibleUrl(media.url);
-    this.thumbnail_url = media.thumbnail_url ? this.convertToAccessibleUrl(media.thumbnail_url) : undefined;
+    this.thumbnail_url = media.thumbnail_url
+      ? this.convertToAccessibleUrl(media.thumbnail_url)
+      : undefined;
 
     this.size = media.size;
     this.media_type = media.media_type;
@@ -154,6 +174,11 @@ export class MediaResponseDto {
     this.source = media.source;
     this.original_created_at = media.original_created_at;
     this.source_metadata = media.source_metadata;
+    const originalFileUrl =
+      media.source_metadata?.original_file_url || media.url;
+    this.original_file_url = originalFileUrl
+      ? this.convertToAccessibleUrl(originalFileUrl)
+      : undefined;
 
     // 直接赋值，让@Transform装饰器处理序列化
     this.created_at = media.created_at;
@@ -167,35 +192,40 @@ export class MediaResponseDto {
     };
 
     // 分类信息
-    this.category = media.category ? {
-      id: media.category.id,
-      name: media.category.name,
-      description: media.category.description,
-    } : undefined;
+    this.category = media.category
+      ? {
+          id: media.category.id,
+          name: media.category.name,
+          description: media.category.description,
+        }
+      : undefined;
 
     // 标签信息 - 修复：使用media_tags而不是tags
-    this.tags = media.media_tags?.map((mediaTag: any) => ({
-      id: mediaTag.tag.id,
-      name: mediaTag.tag.name,
-    })) || [];
-
-    // 兼容审核页面的标签格式
-    this.media_tags = media.media_tags?.map((mediaTag: any) => ({
-      tag: {
+    this.tags =
+      media.media_tags?.map((mediaTag: any) => ({
         id: mediaTag.tag.id,
         name: mediaTag.tag.name,
-      }
-    })) || [];
+      })) || [];
+
+    // 兼容审核页面的标签格式
+    this.media_tags =
+      media.media_tags?.map((mediaTag: any) => ({
+        tag: {
+          id: mediaTag.tag.id,
+          name: mediaTag.tag.name,
+        },
+      })) || [];
 
     // 处理视频质量数据（仅对视频类型有效）
-    this.video_qualities = media.video_qualities?.map((quality: any) => ({
-      id: quality.id,
-      quality: quality.quality,
-      url: this.convertToAccessibleUrl(quality.url), // 🔑 关键：也要转换video_qualities的URL
-      size: quality.size,
-      width: quality.width,
-      height: quality.height,
-    })) || [];
+    this.video_qualities =
+      media.video_qualities?.map((quality: any) => ({
+        id: quality.id,
+        quality: quality.quality,
+        url: this.convertToAccessibleUrl(quality.url), // 🔑 关键：也要转换video_qualities的URL
+        size: quality.size,
+        width: quality.width,
+        height: quality.height,
+      })) || [];
   }
 
   /**
@@ -205,24 +235,51 @@ export class MediaResponseDto {
   private convertToAccessibleUrl(relativePath: string): string {
     if (!relativePath) return '';
 
-    // 如果已经是完整URL，直接返回
-    if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
-      return relativePath;
+    const cleanPath = relativePath.trim();
+
+    const extractProcessed = (path: string): string => {
+      const match = path.match(/processed\/.+$/);
+      if (match) {
+        return `/${match[0]}`;
+      }
+      return '';
+    };
+
+    // 已经是完整URL
+    if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) {
+      const processedPath = extractProcessed(cleanPath);
+      if (processedPath) {
+        return processedPath;
+      }
+      return cleanPath;
     }
 
-    // 如果已经是API路径，直接返回
-    if (relativePath.startsWith('/api/upload/file/')) {
-      return `http://localhost:3000${relativePath}`;
+    // 已经是 /processed 路径
+    if (cleanPath.startsWith('/processed/')) {
+      return cleanPath;
+    }
+    if (cleanPath.startsWith('processed/')) {
+      return `/${cleanPath}`;
     }
 
-    // 处理相对路径：移除uploads/前缀，保留子目录
-    // "uploads/image/xxx.jpg" -> "image/xxx.jpg"
-    let cleanPath = relativePath;
+    // API 路径，可能包含 processed
+    if (cleanPath.startsWith('/api/upload/file/processed/')) {
+      const processedPath = cleanPath.replace('/api/upload/file', '');
+      return processedPath.startsWith('/')
+        ? processedPath
+        : `/${processedPath}`;
+    }
+
     if (cleanPath.startsWith('uploads/')) {
-      cleanPath = cleanPath.substring('uploads/'.length);
+      const uploadPath = cleanPath.substring('uploads/'.length);
+      return `/api/upload/file/${uploadPath}`;
     }
 
-    return `http://localhost:3000/api/upload/file/${cleanPath}`;
+    if (cleanPath.startsWith('/api/upload/file/')) {
+      return cleanPath;
+    }
+
+    return `/api/upload/file/${cleanPath}`;
   }
 }
 
@@ -241,7 +298,12 @@ export class MediaListResponseDto {
     totalPages: number;
   };
 
-  constructor(data: MediaResponseDto[], meta: any, skip: number = 0, take: number = 20) {
+  constructor(
+    data: MediaResponseDto[],
+    meta: any,
+    skip: number = 0,
+    take: number = 20,
+  ) {
     this.success = true;
     this.data = data;
 
@@ -253,7 +315,7 @@ export class MediaListResponseDto {
       page,
       limit: take,
       total: meta.total,
-      totalPages
+      totalPages,
     };
   }
-} 
+}

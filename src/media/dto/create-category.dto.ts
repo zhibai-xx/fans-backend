@@ -9,7 +9,7 @@ export class CreateCategoryDto {
   @ApiProperty({
     description: '分类名称',
     example: '舞台照',
-    maxLength: 50
+    maxLength: 50,
   })
   @IsString()
   @IsNotEmpty()
@@ -24,10 +24,10 @@ export class CreateCategoryDto {
     description: '分类描述',
     example: '演唱会和舞台表演的照片',
     maxLength: 200,
-    required: false
+    required: false,
   })
   @IsString()
   @IsOptional()
   @MaxLength(200)
   description?: string;
-} 
+}

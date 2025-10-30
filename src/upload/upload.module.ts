@@ -47,4 +47,4 @@ import { v4 as uuidv4 } from 'uuid';
     StorageFactoryService,
   ],
 })
-export class UploadModule { }
+export class UploadModule {}

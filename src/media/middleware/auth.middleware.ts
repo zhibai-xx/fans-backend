@@ -30,17 +30,17 @@ export class AuthMiddleware implements NestMiddleware {
   async use(req: Request, res: Response, next: NextFunction) {
     // 从请求头或cookie中获取认证信息
     const authHeader = req.headers.authorization;
-    
+
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
-      
+
       try {
         // 这里应该实现真正的token验证和用户信息获取
         // 以下是模拟实现，实际项目中需要替换为JWT验证等机制
-        
+
         // 模拟从token中提取用户ID
         const userId = parseInt(token.split('.')[0], 10);
-        
+
         if (!isNaN(userId)) {
           // 从数据库加载用户信息
           const user = await this.databaseService.user.findUnique({
@@ -48,10 +48,10 @@ export class AuthMiddleware implements NestMiddleware {
             select: {
               id: true,
               username: true,
-              role: true
-            }
+              role: true,
+            },
           });
-          
+
           if (user) {
             req.user = user;
           }
@@ -61,7 +61,7 @@ export class AuthMiddleware implements NestMiddleware {
         console.error('认证解析失败:', error);
       }
     }
-    
+
     next();
   }
-} 
+}

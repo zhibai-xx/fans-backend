@@ -15,7 +15,7 @@ import { LogsService } from '../../logs/services/logs.service';
 @Controller('admin/logs')
 @UseGuards(JwtAuthGuard, AdminRoleGuard)
 export class AdminLogsController {
-  constructor(private readonly logsService: LogsService) { }
+  constructor(private readonly logsService: LogsService) {}
 
   /**
    * 获取操作日志列表
@@ -24,7 +24,11 @@ export class AdminLogsController {
   @ApiOperation({ summary: '获取操作日志列表' })
   @ApiQuery({ name: 'page', required: false, description: '页码' })
   @ApiQuery({ name: 'limit', required: false, description: '每页数量' })
-  @ApiQuery({ name: 'operation_type', required: false, description: '操作类型' })
+  @ApiQuery({
+    name: 'operation_type',
+    required: false,
+    description: '操作类型',
+  })
   @ApiQuery({ name: 'module', required: false, description: '操作模块' })
   @ApiQuery({ name: 'action', required: false, description: '具体操作' })
   @ApiQuery({ name: 'result', required: false, description: '操作结果' })
@@ -59,7 +63,11 @@ export class AdminLogsController {
       }
     });
 
-    const operationResult = await this.logsService.getOperationLogs(filters, page, limit);
+    const operationResult = await this.logsService.getOperationLogs(
+      filters,
+      page,
+      limit,
+    );
 
     return {
       success: true,
@@ -107,7 +115,11 @@ export class AdminLogsController {
       }
     });
 
-    const loginResult = await this.logsService.getLoginLogs(filters, page, limit);
+    const loginResult = await this.logsService.getLoginLogs(
+      filters,
+      page,
+      limit,
+    );
 
     return {
       success: true,
@@ -121,7 +133,11 @@ export class AdminLogsController {
    */
   @Get('operations/stats')
   @ApiOperation({ summary: '获取操作日志统计' })
-  @ApiQuery({ name: 'days', required: false, description: '统计天数，默认30天' })
+  @ApiQuery({
+    name: 'days',
+    required: false,
+    description: '统计天数，默认30天',
+  })
   async getOperationStats(
     @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
   ) {
@@ -138,7 +154,11 @@ export class AdminLogsController {
    */
   @Get('logins/stats')
   @ApiOperation({ summary: '获取登录日志统计' })
-  @ApiQuery({ name: 'days', required: false, description: '统计天数，默认30天' })
+  @ApiQuery({
+    name: 'days',
+    required: false,
+    description: '统计天数，默认30天',
+  })
   async getLoginStats(
     @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
   ) {
@@ -163,7 +183,11 @@ export class AdminLogsController {
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
     @Query('days', new DefaultValuePipe(7), ParseIntPipe) days: number,
   ) {
-    const stats = await this.logsService.getUserActivityStats(days, page, limit);
+    const stats = await this.logsService.getUserActivityStats(
+      days,
+      page,
+      limit,
+    );
 
     return {
       success: true,

@@ -6,7 +6,7 @@ import {
   Req,
   NotFoundException,
   StreamableFile,
-  Header
+  Header,
 } from '@nestjs/common';
 import { Response, Request } from 'express';
 import { join } from 'path';
@@ -20,13 +20,14 @@ export class FileController {
   private readonly uploadDir: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.uploadDir = this.configService.get<string>('UPLOAD_DIR') || './uploads';
+    this.uploadDir =
+      this.configService.get<string>('UPLOAD_DIR') || './uploads';
   }
 
   /**
    * 提供静态文件访问
    * 为了安全起见，防止目录遍历攻击，该方法包含额外的安全检查
-   * 
+   *
    * @param type 文件类型目录 (image/video等)
    * @param filename 文件名
    * @param res Express响应对象
@@ -37,9 +38,14 @@ export class FileController {
     @Param('type') type: string,
     @Param('filename') filename: string,
     @Req() req: Request,
-    @Res() res: Response // 移除 passthrough，直接控制响应
+    @Res() res: Response, // 移除 passthrough，直接控制响应
   ): Promise<void> {
-    console.log('📁 FileController.serveFile - 文件类型:', type, '文件名:', filename);
+    console.log(
+      '📁 FileController.serveFile - 文件类型:',
+      type,
+      '文件名:',
+      filename,
+    );
 
     try {
       // 构建相对路径
@@ -79,10 +85,10 @@ export class FileController {
         console.log('📹 处理Range请求:', range);
 
         // 解析Range头
-        const parts = range.replace(/bytes=/, "").split("-");
+        const parts = range.replace(/bytes=/, '').split('-');
         const start = parseInt(parts[0], 10);
         const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
-        const chunksize = (end - start) + 1;
+        const chunksize = end - start + 1;
 
         // 设置Range响应头
         res.status(206);
@@ -113,20 +119,19 @@ export class FileController {
         const fileStream = fs.createReadStream(filePath);
         fileStream.pipe(res);
       }
-
     } catch (error) {
       console.log('💥 FileController 错误:', error.message);
       if (error instanceof NotFoundException) {
         res.status(404).json({
           statusCode: 404,
           message: error.message,
-          error: 'Not Found'
+          error: 'Not Found',
         });
       } else {
         res.status(500).json({
           statusCode: 500,
           message: '文件访问失败',
-          error: 'Internal Server Error'
+          error: 'Internal Server Error',
         });
       }
     }
@@ -175,7 +180,7 @@ export class FileController {
     // 移除开头的斜杠
     let sanitized = filePath.startsWith('/') ? filePath.substring(1) : filePath;
 
-    // 防止目录遍历攻击：移除 ../ 和 ..\ 
+    // 防止目录遍历攻击：移除 ../ 和 ..\
     sanitized = sanitized.replace(/\.\.[\/\\]/g, '');
 
     // 移除危险字符但保留正常的路径分隔符
@@ -194,4 +199,4 @@ export class FileController {
     const resolvedUploadDir = path.resolve(this.uploadDir);
     return resolvedPath.startsWith(resolvedUploadDir);
   }
-} 
+}

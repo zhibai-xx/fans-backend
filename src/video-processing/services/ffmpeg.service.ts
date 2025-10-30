@@ -15,6 +15,7 @@ export interface VideoMetadata {
   format: string;
   size: number;
   codec: string;
+  rotation: number;
 }
 
 export interface VideoQuality {
@@ -28,7 +29,7 @@ export interface VideoQuality {
 
 /**
  * FFmpeg服务 - 使用原生FFmpeg CLI替代废弃的fluent-ffmpeg
- * 
+ *
  * 功能包括：
  * - 视频元数据提取
  * - 视频转码和格式转换
@@ -69,15 +70,56 @@ export class FFmpegService {
       maxBitrate: '1500k',
       bufsize: '2000k',
     },
-    '360p': {
-      name: '360p',
-      width: 640,
-      height: 360,
-      bitrate: '600k',
-      maxBitrate: '900k',
-      bufsize: '1200k',
-    },
   };
+
+  private readonly shortVideoThresholdSeconds = 6;
+
+  /**
+   * 根据原视频尺寸/时长返回建议的质量列表（不含原画）
+   */
+  getRecommendedQualities(metadata: VideoMetadata): VideoQuality[] {
+    const { duration } = metadata;
+    if (duration <= this.shortVideoThresholdSeconds) {
+      return [];
+    }
+
+    const { effectiveWidth, effectiveHeight } =
+      this.getEffectiveDimensions(metadata);
+
+    if (!effectiveWidth || !effectiveHeight) {
+      return [];
+    }
+
+    type QualityKey = '480p' | '720p' | '1080p';
+    const presets: Array<{ key: QualityKey; minHeight: number }> = [
+      { key: '480p', minHeight: 400 },
+      { key: '720p', minHeight: 700 },
+      { key: '1080p', minHeight: 1000 },
+    ];
+
+    const selected: VideoQuality[] = [];
+
+    for (const preset of presets) {
+      const baseQuality = this.videoQualities[preset.key];
+      if (!baseQuality) continue;
+
+      if (effectiveHeight < preset.minHeight) {
+        continue;
+      }
+
+      const customized = this.buildQualityPreset(
+        baseQuality,
+        effectiveWidth,
+        effectiveHeight,
+      );
+
+      if (customized) {
+        selected.push(customized);
+      }
+    }
+
+    return selected;
+  }
 
   constructor(private configService: ConfigService) {
     // 确保FFmpeg和FFprobe路径可用
@@ -113,34 +155,59 @@ export class FFmpegService {
 
     try {
       const { stdout } = await execa(this.ffprobePath, [
-        '-v', 'quiet',
-        '-print_format', 'json',
+        '-v',
+        'quiet',
+        '-print_format',
+        'json',
         '-show_format',
         '-show_streams',
-        videoPath
+        videoPath,
       ]);
 
       const metadata = JSON.parse(stdout);
-      const videoStream = metadata.streams.find((stream: any) => stream.codec_type === 'video');
+      const videoStream = metadata.streams.find(
+        (stream: any) => stream.codec_type === 'video',
+      );
 
       if (!videoStream) {
         throw new Error('未找到视频流');
       }
+
+      let rotation = 0;
+      if (videoStream.rotation !== undefined) {
+        rotation = Number(videoStream.rotation) || 0;
+      } else if (videoStream.tags?.rotate) {
+        rotation = Number(videoStream.tags.rotate) || 0;
+      } else if (Array.isArray(videoStream.side_data_list)) {
+        const rotationEntry = videoStream.side_data_list.find(
+          (item: any) => item.rotation !== undefined,
+        );
+        if (rotationEntry) {
+          rotation = Number(rotationEntry.rotation) || 0;
+        }
+      }
+
+      const normalizedRotation = ((rotation % 360) + 360) % 360;
 
       const result: VideoMetadata = {
         duration: parseFloat(metadata.format.duration?.toString() || '0') || 0,
         width: videoStream.width || 0,
         height: videoStream.height || 0,
         bitrate: parseInt(metadata.format.bit_rate?.toString() || '0') || 0,
-        fps: this.parseFPS((videoStream.r_frame_rate || videoStream.avg_frame_rate) || '') || 0,
+        fps:
+          this.parseFPS(
+            videoStream.r_frame_rate || videoStream.avg_frame_rate || '',
+          ) || 0,
         format: metadata.format.format_name || 'unknown',
         size: parseInt(metadata.format.size?.toString() || '0') || 0,
         codec: videoStream.codec_name || 'unknown',
+        rotation: normalizedRotation,
       };
 
-      this.logger.debug(`视频元数据提取成功: ${result.width}x${result.height}, ${result.duration}s, ${result.format}`);
+      this.logger.debug(
+        `视频元数据提取成功: ${result.width}x${result.height}, ${result.duration}s, ${result.format}`,
+      );
       return result;
-
     } catch (error) {
       this.logger.error(`提取视频元数据失败: ${error.message}`, error.stack);
       throw new Error(`提取视频元数据失败: ${error.message}`);
@@ -163,26 +230,48 @@ export class FFmpegService {
       preset?: string;
       crf?: number;
       copyAudio?: boolean;
-    } = {}
+      metadata?: VideoMetadata;
+    } = {},
   ): Promise<void> {
-    const { preset = 'medium', crf = 23, copyAudio = false } = options;
+    const {
+      preset = 'medium',
+      crf = 23,
+      copyAudio = false,
+      metadata,
+    } = options;
 
-    this.logger.log(`开始转码视频: ${inputPath} -> ${outputPath} (${quality.name})`);
+    this.logger.log(
+      `开始转码视频: ${inputPath} -> ${outputPath} (${quality.name})`,
+    );
 
     // 确保输出目录存在
     await fs.ensureDir(path.dirname(outputPath));
 
+    const filterChain = this.buildVideoFilters(metadata, quality);
+
     const args = [
-      '-i', inputPath,
-      '-c:v', 'libx264',
-      '-preset', preset,
-      '-crf', crf.toString(),
-      '-vf', `scale=${quality.width}:${quality.height}`,
-      '-b:v', quality.bitrate,
-      '-maxrate', quality.maxBitrate,
-      '-bufsize', quality.bufsize,
-      '-movflags', '+faststart',
-      '-pix_fmt', 'yuv420p',
+      '-i',
+      inputPath,
+      '-c:v',
+      'libx264',
+      '-preset',
+      preset,
+      '-crf',
+      crf.toString(),
+      '-vf',
+      filterChain,
+      '-b:v',
+      quality.bitrate,
+      '-maxrate',
+      quality.maxBitrate,
+      '-bufsize',
+      quality.bufsize,
+      '-movflags',
+      '+faststart',
+      '-pix_fmt',
+      'yuv420p',
+      '-metadata:s:v:0',
+      'rotate=0',
     ];
 
     // 音频处理
@@ -206,6 +295,130 @@ export class FFmpegService {
   }
 
   /**
+   * 将MOV视频快速转封装为MP4，同时保持视频码流并提升播放器兼容性
+   */
+  async convertMovToMp4(
+    inputPath: string,
+    outputPath: string,
+    metadata: VideoMetadata,
+  ): Promise<void> {
+    this.logger.log(`开始转换MOV到MP4: ${inputPath} -> ${outputPath}`);
+
+    await fs.ensureDir(path.dirname(outputPath));
+
+    const filters = this.buildVideoFilters(metadata);
+
+    const args = [
+      '-i',
+      inputPath,
+      '-c:v',
+      'libx264',
+      '-preset',
+      'medium',
+      '-crf',
+      '20',
+      ...(filters ? ['-vf', filters] : []),
+      '-b:a',
+      '192k',
+      '-c:a',
+      'aac',
+      '-movflags',
+      '+faststart',
+      '-pix_fmt',
+      'yuv420p',
+      '-metadata:s:v:0',
+      'rotate=0',
+      '-y',
+      outputPath,
+    ];
+
+    try {
+      const { stdout, stderr } = await execa(this.ffmpegPath, args);
+      this.logger.debug(`FFmpeg MOV转换输出: ${stdout}`);
+      this.logger.debug(`FFmpeg MOV转换错误输出: ${stderr}`);
+    } catch (error) {
+      this.logger.error(`转换MOV到MP4失败: ${error.message}`, error.stack);
+      throw new Error(`转换MOV到MP4失败: ${error.message}`);
+    }
+  }
+
+  private buildQualityPreset(
+    preset: VideoQuality,
+    effectiveWidth: number,
+    effectiveHeight: number,
+  ): VideoQuality | null {
+    const aspectRatio = effectiveWidth / effectiveHeight;
+
+    let targetHeight = Math.min(preset.height, effectiveHeight);
+    let targetWidth = Math.round(targetHeight * aspectRatio);
+
+    if (targetWidth > effectiveWidth) {
+      const scaleFactor = effectiveWidth / targetWidth;
+      targetWidth = effectiveWidth;
+      targetHeight = Math.round(targetHeight * scaleFactor);
+    }
+
+    targetWidth = this.ensureEven(targetWidth);
+    const finalHeight = this.ensureEven(targetHeight);
+
+    if (targetWidth < 2 || finalHeight < 2) {
+      return null;
+    }
+
+    return {
+      ...preset,
+      width: targetWidth,
+      height: finalHeight,
+    };
+  }
+
+  private ensureEven(value: number): number {
+    if (!Number.isFinite(value)) {
+      return 2;
+    }
+    return value % 2 === 0 ? value : value - 1;
+  }
+
+  private getEffectiveDimensions(metadata: VideoMetadata): {
+    effectiveWidth: number;
+    effectiveHeight: number;
+  } {
+    const rotation = metadata.rotation ?? 0;
+    const swap = rotation === 90 || rotation === 270;
+    const effectiveWidth = swap ? metadata.height : metadata.width;
+    const effectiveHeight = swap ? metadata.width : metadata.height;
+    return {
+      effectiveWidth,
+      effectiveHeight,
+    };
+  }
+
+  private buildVideoFilters(
+    metadata: VideoMetadata | undefined,
+    quality?: { width: number; height: number },
+  ): string {
+    const filters: string[] = [];
+
+    if (metadata) {
+      if (metadata.rotation === 90) {
+        filters.push('transpose=clock');
+      } else if (metadata.rotation === 180) {
+        filters.push('transpose=clock,transpose=clock');
+      } else if (metadata.rotation === 270) {
+        filters.push('transpose=cclock');
+      }
+    }
+
+    if (quality) {
+      filters.push(`scale=${quality.width}:${quality.height}`);
+    }
+
+    filters.push('setsar=1');
+
+    return filters.join(',');
+  }
+
+  /**
    * 生成视频缩略图
    * @param videoPath 视频文件路径
    * @param outputPath 缩略图输出路径
@@ -221,17 +434,19 @@ export class FFmpegService {
       height?: number;
       timeOffset?: number;
       interval?: number;
-    } = {}
+    } = {},
   ): Promise<string[]> {
     const {
       count = 1,
       width = 320,
       height = 240,
       timeOffset = 10,
-      interval = 10
+      interval = 10,
     } = options;
 
-    this.logger.log(`开始生成视频缩略图: ${videoPath} -> ${outputPath} (${count}张, ${width}x${height})`);
+    this.logger.log(
+      `开始生成视频缩略图: ${videoPath} -> ${outputPath} (${count}张, ${width}x${height})`,
+    );
 
     // 确保输出目录存在
     const outputDir = path.dirname(outputPath);
@@ -243,17 +458,21 @@ export class FFmpegService {
       if (count === 1) {
         // 生成单张缩略图 - 保持比例，不强制拉伸
         const args = [
-          '-i', videoPath,
-          '-ss', timeOffset.toString(),
-          '-vframes', '1',
-          '-vf', `scale=${width}:${height}`,
-          '-y', outputPath
+          '-i',
+          videoPath,
+          '-ss',
+          timeOffset.toString(),
+          '-vframes',
+          '1',
+          '-vf',
+          `scale=${width}:${height}`,
+          '-y',
+          outputPath,
         ];
 
         await execa(this.ffmpegPath, args);
         thumbnails.push(outputPath);
         this.logger.log(`单张缩略图生成完成: ${outputPath}`);
-
       } else {
         // 生成多张缩略图
         const baseName = path.basename(outputPath, path.extname(outputPath));
@@ -264,11 +483,16 @@ export class FFmpegService {
           const thumbPath = path.join(outputDir, `${baseName}_${i + 1}${ext}`);
 
           const args = [
-            '-i', videoPath,
-            '-ss', timestamp.toString(),
-            '-vframes', '1',
-            '-vf', `scale=${width}:${height}`,
-            '-y', thumbPath
+            '-i',
+            videoPath,
+            '-ss',
+            timestamp.toString(),
+            '-vframes',
+            '1',
+            '-vf',
+            `scale=${width}:${height}`,
+            '-y',
+            thumbPath,
           ];
 
           await execa(this.ffmpegPath, args);
@@ -279,7 +503,6 @@ export class FFmpegService {
       }
 
       return thumbnails;
-
     } catch (error) {
       this.logger.error(`生成缩略图失败: ${error.message}`, error.stderr);
       throw new Error(`生成缩略图失败: ${error.message}`);
@@ -301,13 +524,17 @@ export class FFmpegService {
       thumbWidth?: number;
       thumbHeight?: number;
       columns?: number;
-    } = {}
-  ): Promise<{ imagePath: string, vttPath: string, thumbnails: Array<{ time: number, x: number, y: number }> }> {
+    } = {},
+  ): Promise<{
+    imagePath: string;
+    vttPath: string;
+    thumbnails: Array<{ time: number; x: number; y: number }>;
+  }> {
     const {
       interval = 10,
       thumbWidth = 160,
       thumbHeight = 90,
-      columns = 10
+      columns = 10,
     } = options;
 
     this.logger.log(`开始生成视频精灵图: ${videoPath} -> ${outputImagePath}`);
@@ -334,14 +561,22 @@ export class FFmpegService {
       const tempThumbnails: string[] = [];
       for (let i = 0; i < thumbCount; i++) {
         const timestamp = i * interval;
-        const tempThumbPath = path.join(tempDir, `thumb_${i.toString().padStart(4, '0')}.jpg`);
+        const tempThumbPath = path.join(
+          tempDir,
+          `thumb_${i.toString().padStart(4, '0')}.jpg`,
+        );
 
         const args = [
-          '-i', videoPath,
-          '-ss', timestamp.toString(),
-          '-vframes', '1',
-          '-vf', `scale=${thumbWidth}:${thumbHeight}`,
-          '-y', tempThumbPath
+          '-i',
+          videoPath,
+          '-ss',
+          timestamp.toString(),
+          '-vframes',
+          '1',
+          '-vf',
+          `scale=${thumbWidth}:${thumbHeight}`,
+          '-y',
+          tempThumbPath,
         ];
 
         await execa(this.ffmpegPath, args);
@@ -356,26 +591,39 @@ export class FFmpegService {
       // 3. 合并所有缩略图为精灵图
       const tilePattern = `${columns}x${rows}`;
       const args = [
-        '-i', path.join(tempDir, 'thumb_%04d.jpg'),
-        '-filter_complex', `tile=${tilePattern}`,
-        '-y', outputImagePath
+        '-i',
+        path.join(tempDir, 'thumb_%04d.jpg'),
+        '-filter_complex',
+        `tile=${tilePattern}`,
+        '-y',
+        outputImagePath,
       ];
 
       await execa(this.ffmpegPath, args);
 
       // 4. 生成VTT文件
-      const vttPath = outputImagePath.replace(path.extname(outputImagePath), '.vtt');
-      const thumbnails = this.generateVTTFile(vttPath, thumbCount, interval, thumbWidth, thumbHeight, columns, outputImagePath);
+      const vttPath = outputImagePath.replace(
+        path.extname(outputImagePath),
+        '.vtt',
+      );
+      const thumbnails = this.generateVTTFile(
+        vttPath,
+        thumbCount,
+        interval,
+        thumbWidth,
+        thumbHeight,
+        columns,
+        outputImagePath,
+      );
 
       // 5. 清理临时文件
       await fs.remove(tempDir);
 
       this.logger.log(`精灵图生成完成: ${outputImagePath}, VTT: ${vttPath}`);
       return { imagePath: outputImagePath, vttPath, thumbnails };
-
     } catch (error) {
       // 清理临时文件
-      await fs.remove(tempDir).catch(() => { });
+      await fs.remove(tempDir).catch(() => {});
       this.logger.error(`生成精灵图失败: ${error.message}`, error.stderr);
       throw new Error(`生成精灵图失败: ${error.message}`);
     }
@@ -391,7 +639,8 @@ export class FFmpegService {
   async generateHLS(
     inputPath: string,
     outputDir: string,
-    qualities: VideoQuality[]
+    qualities: VideoQuality[],
+    metadata?: VideoMetadata,
   ): Promise<string> {
     this.logger.log(`开始生成HLS流: ${inputPath} -> ${outputDir}`);
 
@@ -410,25 +659,42 @@ export class FFmpegService {
         const segmentPattern = path.join(qualityDir, 'segment_%03d.ts');
 
         const args = [
-          '-i', inputPath,
-          '-c:v', 'libx264',
-          '-c:a', 'aac',
-          '-vf', `scale=${quality.width}:${quality.height}`,
-          '-b:v', quality.bitrate,
-          '-maxrate', quality.maxBitrate,
-          '-bufsize', quality.bufsize,
-          '-b:a', '128k',
-          '-f', 'hls',
-          '-hls_time', '10',
-          '-hls_list_size', '0',
-          '-hls_segment_filename', segmentPattern,
-          '-y', playlistPath
+          '-i',
+          inputPath,
+          '-c:v',
+          'libx264',
+          '-c:a',
+          'aac',
+          '-vf',
+          this.buildVideoFilters(metadata, quality),
+          '-b:v',
+          quality.bitrate,
+          '-maxrate',
+          quality.maxBitrate,
+          '-bufsize',
+          quality.bufsize,
+          '-b:a',
+          '128k',
+          '-f',
+          'hls',
+          '-hls_time',
+          '10',
+          '-hls_list_size',
+          '0',
+          '-hls_segment_filename',
+          segmentPattern,
+          '-metadata:s:v:0',
+          'rotate=0',
+          '-y',
+          playlistPath,
         ];
 
         await execa(this.ffmpegPath, args);
         playlistPaths.push(playlistPath);
 
-        this.logger.debug(`HLS质量流生成完成: ${quality.name} -> ${playlistPath}`);
+        this.logger.debug(
+          `HLS质量流生成完成: ${quality.name} -> ${playlistPath}`,
+        );
       }
 
       // 生成主播放列表
@@ -437,7 +703,6 @@ export class FFmpegService {
 
       this.logger.log(`HLS流生成完成: ${masterPlaylistPath}`);
       return masterPlaylistPath;
-
     } catch (error) {
       this.logger.error(`HLS流生成失败: ${error.message}`, error.stderr);
       throw new Error(`HLS流生成失败: ${error.message}`);
@@ -478,9 +743,9 @@ export class FFmpegService {
     thumbWidth: number,
     thumbHeight: number,
     columns: number,
-    spriteImagePath: string
-  ): Array<{ time: number, x: number, y: number }> {
-    const thumbnails: Array<{ time: number, x: number, y: number }> = [];
+    spriteImagePath: string,
+  ): Array<{ time: number; x: number; y: number }> {
+    const thumbnails: Array<{ time: number; x: number; y: number }> = [];
     let vttContent = 'WEBVTT\n\n';
 
     for (let i = 0; i < thumbCount; i++) {
@@ -491,7 +756,9 @@ export class FFmpegService {
       thumbnails.push({ time, x, y });
 
       const startTime = this.formatVTTTime(time);
-      const endTime = this.formatVTTTime(Math.min(time + interval, thumbCount * interval));
+      const endTime = this.formatVTTTime(
+        Math.min(time + interval, thumbCount * interval),
+      );
       const spriteFileName = path.basename(spriteImagePath);
 
       vttContent += `${startTime} --> ${endTime}\n`;
@@ -523,13 +790,14 @@ export class FFmpegService {
    */
   private async generateMasterPlaylist(
     masterPlaylistPath: string,
-    qualities: VideoQuality[]
+    qualities: VideoQuality[],
   ): Promise<void> {
     let content = '#EXTM3U\n#EXT-X-VERSION:3\n\n';
 
     for (const quality of qualities) {
-      const bandwidth = parseInt(quality.bitrate) * 1000; // 转换为bps
-      content += `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${quality.width}x${quality.height}\n`;
+      const rawBandwidth = parseInt(quality.bitrate) || 5000;
+      const effectiveBandwidth = Math.max(rawBandwidth, 500) * 1000;
+      content += `#EXT-X-STREAM-INF:BANDWIDTH=${effectiveBandwidth},RESOLUTION=${quality.width}x${quality.height}\n`;
       content += `${quality.name}/playlist.m3u8\n`;
     }
 
@@ -552,86 +820,5 @@ export class FFmpegService {
       this.logger.error(`FFmpeg执行失败: ${error.message}`, error.stderr);
       throw new Error(`FFmpeg执行失败: ${error.message}`);
     }
-  }
-
-  /**
-   * 获取可用的质量配置 - 根据原始视频比例动态调整
-   * @param originalWidth 原始宽度
-   * @param originalHeight 原始高度
-   * @returns VideoQuality[]
-   */
-  getAvailableQualities(originalWidth: number, originalHeight: number): VideoQuality[] {
-    const availableQualities: VideoQuality[] = [];
-    const originalAspectRatio = originalWidth / originalHeight;
-    const isVertical = originalHeight > originalWidth;
-
-    this.logger.debug(`原始视频尺寸: ${originalWidth}×${originalHeight}, 比例: ${originalAspectRatio.toFixed(2)}, 竖屏: ${isVertical}`);
-
-    // 根据原始视频比例调整质量配置
-    for (const [key, baseQuality] of Object.entries(this.videoQualities)) {
-      let targetWidth: number, targetHeight: number;
-
-      if (isVertical) {
-        // 竖屏视频：以高度为基准，按比例计算宽度
-        targetHeight = Math.min(baseQuality.height, originalHeight);
-        targetWidth = Math.round(targetHeight * originalAspectRatio);
-
-        // 确保尺寸是偶数（libx264要求）
-        targetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
-        targetHeight = targetHeight % 2 === 0 ? targetHeight : targetHeight - 1;
-      } else {
-        // 横屏视频：以宽度为基准，按比例计算高度
-        targetWidth = Math.min(baseQuality.width, originalWidth);
-        targetHeight = Math.round(targetWidth / originalAspectRatio);
-
-        // 确保尺寸是偶数（libx264要求）
-        targetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
-        targetHeight = targetHeight % 2 === 0 ? targetHeight : targetHeight - 1;
-      }
-
-      // 确保生成的尺寸不超过原始尺寸
-      if (targetWidth <= originalWidth && targetHeight <= originalHeight) {
-        const adjustedQuality: VideoQuality = {
-          ...baseQuality,
-          width: targetWidth,
-          height: targetHeight,
-        };
-
-        availableQualities.push(adjustedQuality);
-        this.logger.debug(`调整后的${key}质量: ${targetWidth}×${targetHeight}`);
-      }
-    }
-
-    // 如果没有合适的预设质量，至少添加一个保持原始比例的质量
-    if (availableQualities.length === 0) {
-      // 生成一个中等质量版本，保持原始比例
-      const maxDimension = Math.max(originalWidth, originalHeight);
-      let targetWidth = originalWidth;
-      let targetHeight = originalHeight;
-
-      // 如果原始尺寸太大，按比例缩小
-      if (maxDimension > 720) {
-        const scaleFactor = 720 / maxDimension;
-        targetWidth = Math.round(originalWidth * scaleFactor);
-        targetHeight = Math.round(originalHeight * scaleFactor);
-      }
-
-      // 确保尺寸是偶数（libx264要求）
-      targetWidth = targetWidth % 2 === 0 ? targetWidth : targetWidth - 1;
-      targetHeight = targetHeight % 2 === 0 ? targetHeight : targetHeight - 1;
-
-      availableQualities.push({
-        name: 'original',
-        width: targetWidth,
-        height: targetHeight,
-        bitrate: '2000k',
-        maxBitrate: '3000k',
-        bufsize: '4000k',
-      });
-
-      this.logger.debug(`生成原始比例质量: ${targetWidth}×${targetHeight}`);
-    }
-
-    return availableQualities.sort((a, b) => b.height - a.height); // 按分辨率降序排列
   }
 }

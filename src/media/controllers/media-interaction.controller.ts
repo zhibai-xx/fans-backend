@@ -42,7 +42,9 @@ import {
 } from '../dto/like.dto';
 
 // 扩展 Request 类型
-type RequestWithUser = ExpressRequest & { user: { id: number, [key: string]: any } };
+type RequestWithUser = ExpressRequest & {
+  user: { id: number; [key: string]: any };
+};
 
 @ApiTags('媒体互动')
 @Controller('media/interaction')
@@ -50,12 +52,14 @@ type RequestWithUser = ExpressRequest & { user: { id: number, [key: string]: any
 @ApiBearerAuth()
 @UseInterceptors(ClassSerializerInterceptor)
 export class MediaInteractionController {
-  private readonly logger = new MyLoggerService(MediaInteractionController.name);
+  private readonly logger = new MyLoggerService(
+    MediaInteractionController.name,
+  );
 
   constructor(
     private readonly mediaInteractionService: MediaInteractionService,
     private readonly userUuidService: UserUuidService,
-  ) { }
+  ) {}
 
   // ===========================================
   // 点赞相关接口
@@ -78,7 +82,9 @@ export class MediaInteractionController {
     @Body() createLikeDto: CreateLikeDto,
     @Req() req: RequestWithUser,
   ): Promise<{ success: boolean; data: LikeResponseDto }> {
-    const userUuid = await this.userUuidService.getUuidByInternalId(req.user.id);
+    const userUuid = await this.userUuidService.getUuidByInternalId(
+      req.user.id,
+    );
     const like = await this.mediaInteractionService.likeMedia(
       req.user.id,
       createLikeDto.media_id,
@@ -156,7 +162,9 @@ export class MediaInteractionController {
     @Body() createFavoriteDto: CreateFavoriteDto,
     @Req() req: RequestWithUser,
   ): Promise<{ success: boolean; data: FavoriteResponseDto }> {
-    const userUuid = await this.userUuidService.getUuidByInternalId(req.user.id);
+    const userUuid = await this.userUuidService.getUuidByInternalId(
+      req.user.id,
+    );
     const favorite = await this.mediaInteractionService.favoriteMedia(
       req.user.id,
       createFavoriteDto.media_id,
@@ -227,7 +235,9 @@ export class MediaInteractionController {
     @Query() query: FavoriteListQueryDto,
     @Req() req: RequestWithUser,
   ): Promise<{ success: boolean; data: any[]; pagination: any }> {
-    const userUuid = await this.userUuidService.getUuidByInternalId(req.user.id);
+    const userUuid = await this.userUuidService.getUuidByInternalId(
+      req.user.id,
+    );
     const result = await this.mediaInteractionService.getUserFavorites(
       req.user.id,
       query.page || 1,

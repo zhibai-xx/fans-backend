@@ -99,10 +99,17 @@ model Media {
   likes       Like[]    // 点赞关联
   video_qualities VideoQuality[] // 新增：视频清晰度关联
   upload      Upload?   // 上传记录（一对一）
+  deleted_at  DateTime?                     // 软删时间
+  deleted_reason String? @db.VarChar(500)   // 删除原因
+  deleted_by  Int?                         // 删除操作者
+  cleanup_scheduled_at DateTime?           // 计划清理时间
+  recycle_logs MediaRecycleLog[]
 
   @@index([user_id, status]) // 加速用户内容管理查询
   @@index([source, original_created_at]) // 加速按来源和原始时间查询
   @@index([reviewed_by, reviewed_at]) // 加速审核员查询
+  @@index([deleted_at, cleanup_scheduled_at])
+  @@index([deleted_by])
 }
 
 enum MediaType {
@@ -126,6 +133,30 @@ enum MediaSource {
   WEIBO_CRAWL  // 微博爬取
   API_IMPORT   // API导入
   BATCH_IMPORT // 批量导入
+}
+
+enum MediaRecycleAction {
+  SOFT_DELETE
+  RESTORE
+  HARD_DELETE
+  CLEANUP_SCHEDULED
+  CLEANUP_SUCCESS
+  CLEANUP_FAIL
+}
+
+model MediaRecycleLog {
+  id          String   @id @default(uuid())
+  media_id    String
+  media       Media    @relation(fields: [media_id], references: [id], onDelete: Cascade)
+  action      MediaRecycleAction
+  operator_id Int?
+  reason      String?  @db.VarChar(500)
+  meta        Json?
+  created_at  DateTime @default(now())
+
+  @@index([media_id, created_at])
+  @@index([action, created_at])
+  @@index([operator_id, created_at])
 }
 
 // =====================================

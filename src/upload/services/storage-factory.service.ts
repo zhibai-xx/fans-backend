@@ -15,7 +15,9 @@ export class StorageFactoryService {
   ) {
     // 根据环境变量选择存储实现
     const useOss = this.configService.get<boolean>('USE_OSS_STORAGE', false);
-    this.storageService = useOss ? this.ossStorageService : this.localStorageService;
+    this.storageService = useOss
+      ? this.ossStorageService
+      : this.localStorageService;
   }
 
   /**
@@ -39,4 +41,4 @@ export class StorageFactoryService {
   useLocalStorage(): void {
     this.storageService = this.localStorageService;
   }
-} 
+}

@@ -1,4 +1,12 @@
-import { Injectable, BadRequestException, NotFoundException, InternalServerErrorException, Logger, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  InternalServerErrorException,
+  Logger,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from 'src/database/database.service';
 import { MediaService } from '../media/media.service';
@@ -10,7 +18,7 @@ import {
   MergeChunksDto,
   InitUploadResponse,
   UploadProgressResponse,
-  FileType
+  FileType,
 } from './dto/upload.dto';
 import { MediaType, Prisma } from '@prisma/client';
 
@@ -44,10 +52,16 @@ export class UploadService {
   private readonly uploadDir: string;
   private readonly tempDir: string;
   private readonly chunkDir: string;
-  private readonly weiboFileCache = new Map<string, { path: string; name: string; type: string }>();
+  private readonly weiboFileCache = new Map<
+    string,
+    { path: string; name: string; type: string }
+  >();
 
   // 性能优化相关
-  private readonly md5Cache = new Map<string, { md5: string; timestamp: number }>();
+  private readonly md5Cache = new Map<
+    string,
+    { md5: string; timestamp: number }
+  >();
   private readonly uploadQueue = new Map<string, Promise<any>>();
   private readonly activeUploads = new Set<string>();
   private cleanupTimer: NodeJS.Timeout | null = null;
@@ -124,7 +138,6 @@ export class UploadService {
 
       // 清理孤立的分片文件
       await this.cleanupOrphanedChunks();
-
     } catch (error) {
       this.logger.error('清理过期数据失败:', error);
     }
@@ -147,7 +160,11 @@ export class UploadService {
             where: { id: dir },
           });
 
-          if (!upload || upload.status === UploadStatus.COMPLETED || upload.status === UploadStatus.FAILED) {
+          if (
+            !upload ||
+            upload.status === UploadStatus.COMPLETED ||
+            upload.status === UploadStatus.FAILED
+          ) {
             // 删除孤立的分片目录
             await fs.remove(dirPath);
             this.logger.log(`清理孤立分片目录: ${dir}`);
@@ -166,14 +183,17 @@ export class UploadService {
     // 检查缓存
     const cacheKey = `${filePath}:${(await fs.stat(filePath)).mtime.getTime()}`;
     const cached = this.md5Cache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < PERFORMANCE_CONFIG.CACHE_TTL) {
+    if (
+      cached &&
+      Date.now() - cached.timestamp < PERFORMANCE_CONFIG.CACHE_TTL
+    ) {
       return cached.md5;
     }
 
     return new Promise((resolve, reject) => {
       const hash = crypto.createHash('md5');
       const stream = fs.createReadStream(filePath, {
-        highWaterMark: PERFORMANCE_CONFIG.CHUNK_MERGE_BUFFER_SIZE
+        highWaterMark: PERFORMANCE_CONFIG.CHUNK_MERGE_BUFFER_SIZE,
       });
 
       stream.on('data', (data) => hash.update(data));
@@ -190,8 +210,13 @@ export class UploadService {
   /**
    * 初始化上传 - 优化版本
    */
-  async initUpload(dto: InitUploadDto, userId: number): Promise<InitUploadResponse> {
-    this.logger.log(`初始化上传: ${dto.filename}, MD5: ${dto.fileMd5}, userid: ${userId}`);
+  async initUpload(
+    dto: InitUploadDto,
+    userId: number,
+  ): Promise<InitUploadResponse> {
+    this.logger.log(
+      `初始化上传: ${dto.filename}, MD5: ${dto.fileMd5}, userid: ${userId}`,
+    );
 
     // 检查并发限制
     if (this.activeUploads.size >= PERFORMANCE_CONFIG.MAX_CONCURRENT_UPLOADS) {
@@ -330,8 +355,8 @@ export class UploadService {
           select: {
             id: true,
             url: true,
-          }
-        }
+          },
+        },
       },
       orderBy: { created_at: 'desc' }, // 获取最新的记录
     });
@@ -366,7 +391,9 @@ export class UploadService {
     file: Express.Multer.File,
     userId: number,
   ): Promise<{ success: boolean; message: string }> {
-    this.logger.log(`上传分片: uploadId=${dto.uploadId}, chunk=${dto.chunkIndex}`);
+    this.logger.log(
+      `上传分片: uploadId=${dto.uploadId}, chunk=${dto.chunkIndex}`,
+    );
 
     // 验证上传记录
     const upload = await this.prisma.upload.findFirst({
@@ -387,7 +414,10 @@ export class UploadService {
     }
 
     // 验证分片索引
-    if (dto.chunkIndex >= dto.totalChunks || dto.totalChunks !== upload.total_chunks) {
+    if (
+      dto.chunkIndex >= dto.totalChunks ||
+      dto.totalChunks !== upload.total_chunks
+    ) {
       throw new BadRequestException('分片参数错误');
     }
 
@@ -426,7 +456,10 @@ export class UploadService {
   /**
    * 合并分片 - 优化版本
    */
-  async mergeChunks(dto: MergeChunksDto, userId: number): Promise<{ mediaId: string }> {
+  async mergeChunks(
+    dto: MergeChunksDto,
+    userId: number,
+  ): Promise<{ mediaId: string }> {
     this.logger.log(`开始合并分片: ${dto.uploadId}`);
 
     // 获取上传记录
@@ -458,12 +491,20 @@ export class UploadService {
       // 生成最终文件路径
       const ext = path.extname(upload.filename);
       const finalFilename = `${upload.file_md5}${ext}`;
-      const finalPath = path.join(this.uploadDir, upload.file_type, finalFilename);
+      const finalPath = path.join(
+        this.uploadDir,
+        upload.file_type,
+        finalFilename,
+      );
       await fs.ensureDir(path.dirname(finalPath));
 
       // 优化的分片合并
       const uploadChunkDir = path.join(this.chunkDir, upload.id);
-      await this.mergeChunksOptimized(uploadChunkDir, finalPath, upload.total_chunks);
+      await this.mergeChunksOptimized(
+        uploadChunkDir,
+        finalPath,
+        upload.total_chunks,
+      );
 
       // 验证文件MD5
       const fileMd5 = await this.calculateFileMd5(finalPath);
@@ -474,6 +515,16 @@ export class UploadService {
 
       // 创建媒体记录
       const metadata = upload.metadata as any;
+      const sourceMetadata: Record<string, any> = {
+        ...(metadata?.sourceMetadata ?? {}),
+        ...(metadata?.source_metadata ?? {}),
+      };
+      const lowerExt = ext.toLowerCase();
+
+      if (upload.file_type === FileType.VIDEO && lowerExt === '.mov') {
+        sourceMetadata.original_file_url = finalPath;
+        sourceMetadata.original_file_format = 'mov';
+      }
 
       // 处理标签：将标签名称转换为标签ID
       let tagIds: string[] = [];
@@ -501,10 +552,15 @@ export class UploadService {
         size: Number(upload.file_size),
         width,
         height,
-        media_type: upload.file_type === FileType.IMAGE ? MediaType.IMAGE : MediaType.VIDEO,
+        media_type:
+          upload.file_type === FileType.IMAGE
+            ? MediaType.IMAGE
+            : MediaType.VIDEO,
         user_id: userId,
         category_id: metadata.categoryId,
         tag_ids: tagIds,
+        source_metadata:
+          Object.keys(sourceMetadata).length > 0 ? sourceMetadata : undefined,
       });
 
       if (!media) {
@@ -529,7 +585,6 @@ export class UploadService {
 
       this.logger.log(`文件合并成功: ${media.id}`);
       return { mediaId: media.id };
-
     } catch (error) {
       // 失败时更新状态
       await this.prisma.upload.update({
@@ -545,7 +600,11 @@ export class UploadService {
   /**
    * 优化的分片合并
    */
-  private async mergeChunksOptimized(chunkDir: string, finalPath: string, totalChunks: number): Promise<void> {
+  private async mergeChunksOptimized(
+    chunkDir: string,
+    finalPath: string,
+    totalChunks: number,
+  ): Promise<void> {
     const writeStream = fs.createWriteStream(finalPath, {
       highWaterMark: PERFORMANCE_CONFIG.CHUNK_MERGE_BUFFER_SIZE,
     });
@@ -575,7 +634,6 @@ export class UploadService {
         writeStream.on('finish', () => resolve());
         writeStream.on('error', reject);
       });
-
     } catch (error) {
       writeStream.destroy();
       throw error;
@@ -585,7 +643,10 @@ export class UploadService {
   /**
    * 获取上传进度
    */
-  async getUploadProgress(uploadId: string, userId: number): Promise<UploadProgressResponse> {
+  async getUploadProgress(
+    uploadId: string,
+    userId: number,
+  ): Promise<UploadProgressResponse> {
     const upload = await this.prisma.upload.findFirst({
       where: {
         id: uploadId,
@@ -598,7 +659,9 @@ export class UploadService {
     }
 
     const uploadedChunks = upload.uploaded_chunks as number[];
-    const progress = Math.round((uploadedChunks.length / upload.total_chunks) * 100);
+    const progress = Math.round(
+      (uploadedChunks.length / upload.total_chunks) * 100,
+    );
 
     let status: 'pending' | 'uploading' | 'completed' | 'failed';
     switch (upload.status) {
@@ -638,7 +701,9 @@ export class UploadService {
         const result = await this.initUpload(file, userId);
         results.push(result);
       } catch (error) {
-        this.logger.error(`批量上传初始化失败: ${file.filename}, ${error.message}`);
+        this.logger.error(
+          `批量上传初始化失败: ${file.filename}, ${error.message}`,
+        );
         // 继续处理其他文件
       }
     }
@@ -690,21 +755,22 @@ export class UploadService {
 
       // 先查找是否存在该标签
       let tag = await this.prisma.tag.findUnique({
-        where: { name: trimmedName }
+        where: { name: trimmedName },
       });
 
       // 如果不存在则创建
       if (!tag) {
         try {
           tag = await this.prisma.tag.create({
-            data: { name: trimmedName }
+            data: { name: trimmedName },
           });
           this.logger.log(`创建新标签: ${trimmedName}`);
         } catch (error) {
           // 处理并发创建的情况，可能其他请求已经创建了相同标签
-          if (error.code === 'P2002') { // Prisma unique constraint error
+          if (error.code === 'P2002') {
+            // Prisma unique constraint error
             tag = await this.prisma.tag.findUnique({
-              where: { name: trimmedName }
+              where: { name: trimmedName },
             });
           }
           if (!tag) {
@@ -759,14 +825,15 @@ export class UploadService {
     this.logger.log('开始扫描weibo文件夹...');
 
     // 使用用户指定的路径或默认路径
-    const weiboBasePath = customPath || path.join(process.cwd(), 'scripts/weibo-crawler/weibo');
+    const weiboBasePath =
+      customPath || path.join(process.cwd(), 'scripts/weibo-crawler/weibo');
 
     // 安全检查：防止目录遍历攻击
     if (customPath && (customPath.includes('..') || customPath.includes('~'))) {
       throw new Error('无效的路径：不允许使用相对路径');
     }
 
-    if (!await fs.pathExists(weiboBasePath)) {
+    if (!(await fs.pathExists(weiboBasePath))) {
       throw new Error(`weibo文件夹不存在: ${weiboBasePath}`);
     }
 
@@ -790,21 +857,26 @@ export class UploadService {
               userId: userDir,
               userName: userDir,
               totalFiles: userFiles.length,
-              files: userFiles
+              files: userFiles,
             });
 
             totalFiles += userFiles.length;
-            totalSize += userFiles.reduce((sum: number, file: any) => sum + file.size, 0);
+            totalSize += userFiles.reduce(
+              (sum: number, file: any) => sum + file.size,
+              0,
+            );
           }
         }
       }
 
-      this.logger.log(`扫描完成: 共找到 ${users.length} 个用户，${totalFiles} 个文件`);
+      this.logger.log(
+        `扫描完成: 共找到 ${users.length} 个用户，${totalFiles} 个文件`,
+      );
 
       return {
         users,
         totalFiles,
-        totalSize
+        totalSize,
       };
     } catch (error) {
       this.logger.error('扫描weibo文件夹失败:', error);
@@ -815,7 +887,10 @@ export class UploadService {
   /**
    * 扫描用户目录
    */
-  private async scanUserDirectory(userPath: string, userId: string): Promise<any[]> {
+  private async scanUserDirectory(
+    userPath: string,
+    userId: string,
+  ): Promise<any[]> {
     const files: any[] = [];
 
     try {
@@ -833,7 +908,7 @@ export class UploadService {
             this.weiboFileCache.set(fileId, {
               path: filePath,
               name: entry.name,
-              type: fileInfo.type
+              type: fileInfo.type,
             });
 
             files.push({
@@ -843,7 +918,7 @@ export class UploadService {
               size: fileInfo.size,
               type: fileInfo.type,
               lastModified: fileInfo.lastModified.toISOString(),
-              dimensions: fileInfo.dimensions
+              dimensions: fileInfo.dimensions,
             });
           }
         } else if (entry.isDirectory()) {
@@ -862,7 +937,10 @@ export class UploadService {
   /**
    * 获取weibo文件信息
    */
-  private async getWeiboFileInfo(filePath: string, fileName: string): Promise<any> {
+  private async getWeiboFileInfo(
+    filePath: string,
+    fileName: string,
+  ): Promise<any> {
     try {
       const stat = await fs.stat(filePath);
       const ext = path.extname(fileName).toLowerCase();
@@ -892,7 +970,10 @@ export class UploadService {
   /**
    * 批量上传weibo文件
    */
-  async batchUploadWeiboFiles(selectedFilePaths: string[], userId: number): Promise<any> {
+  async batchUploadWeiboFiles(
+    selectedFilePaths: string[],
+    userId: number,
+  ): Promise<any> {
     this.logger.log(`开始批量上传 ${selectedFilePaths.length} 个文件`);
 
     const results: any[] = [];
@@ -906,7 +987,7 @@ export class UploadService {
           results.push({
             filePath,
             success: false,
-            error: '不支持的文件类型'
+            error: '不支持的文件类型',
           });
           continue;
         }
@@ -916,21 +997,29 @@ export class UploadService {
 
         // 读取文件内容
         const fileBuffer = await fs.readFile(filePath);
-        const fileMd5 = crypto.createHash('md5').update(fileBuffer).digest('hex');
+        const fileMd5 = crypto
+          .createHash('md5')
+          .update(fileBuffer)
+          .digest('hex');
 
         // 创建上传任务（包含微博元数据）
-        const uploadResult = await this.initWeiboUpload({
-          filename: fileName,
-          fileSize: fileInfo.size,
-          fileType: fileInfo.type === 'video' ? FileType.VIDEO : FileType.IMAGE,
-          fileMd5,
-          title: weiboInfo.title || fileName,
-          description: weiboInfo.description || `从weibo-crawler导入: ${fileName}`,
-          tagIds: [],
-          weiboUserId: weiboInfo.weiboUserId,
-          originalCreatedAt: weiboInfo.originalCreatedAt,
-          sourceMetadata: weiboInfo.sourceMetadata
-        }, userId);
+        const uploadResult = await this.initWeiboUpload(
+          {
+            filename: fileName,
+            fileSize: fileInfo.size,
+            fileType:
+              fileInfo.type === 'video' ? FileType.VIDEO : FileType.IMAGE,
+            fileMd5,
+            title: weiboInfo.title || fileName,
+            description:
+              weiboInfo.description || `从weibo-crawler导入: ${fileName}`,
+            tagIds: [],
+            weiboUserId: weiboInfo.weiboUserId,
+            originalCreatedAt: weiboInfo.originalCreatedAt,
+            sourceMetadata: weiboInfo.sourceMetadata,
+          },
+          userId,
+        );
 
         results.push({
           filePath,
@@ -938,20 +1027,24 @@ export class UploadService {
           uploadId: uploadResult.uploadId,
           success: true,
           needUpload: uploadResult.needUpload,
-          mediaId: uploadResult.mediaId
+          mediaId: uploadResult.mediaId,
         });
 
         // 如果需要上传，直接上传文件
         if (uploadResult.needUpload) {
-          await this.uploadWeiboFileDirectly(uploadResult.uploadId, fileBuffer, fileMd5, userId);
+          await this.uploadWeiboFileDirectly(
+            uploadResult.uploadId,
+            fileBuffer,
+            fileMd5,
+            userId,
+          );
         }
-
       } catch (error) {
         this.logger.error(`上传文件失败 ${filePath}:`, error);
         results.push({
           filePath,
           success: false,
-          error: error.message
+          error: error.message,
         });
       }
     }
@@ -960,12 +1053,12 @@ export class UploadService {
   }
 
   /**
- * 解析微博信息
- */
+   * 解析微博信息
+   */
   private parseWeiboInfo(filePath: string, fileName: string): any {
     // 从文件路径中提取微博用户ID（例如：weibo/6387099968/xxxxx.jpg）
     const pathParts = filePath.split(path.sep);
-    const weiboIndex = pathParts.findIndex(part => part === 'weibo');
+    const weiboIndex = pathParts.findIndex((part) => part === 'weibo');
 
     let weiboUserId: string | null = null;
     if (weiboIndex >= 0 && weiboIndex < pathParts.length - 1) {
@@ -1007,15 +1100,17 @@ export class UploadService {
       originalPath: filePath,
       crawlSource: 'weibo-crawler',
       mediaCategory,
-      importedAt: new Date().toISOString()
+      importedAt: new Date().toISOString(),
     };
 
     return {
       weiboUserId,
       originalCreatedAt,
       sourceMetadata,
-      title: weiboUserId ? `微博用户${weiboUserId}的${mediaCategory}` : fileName,
-      description: `从weibo-crawler导入的${mediaCategory}: ${fileName}${weiboUserId ? ` (用户ID: ${weiboUserId})` : ''}${weiboId ? ` (微博ID: ${weiboId})` : ''}`
+      title: weiboUserId
+        ? `微博用户${weiboUserId}的${mediaCategory}`
+        : fileName,
+      description: `从weibo-crawler导入的${mediaCategory}: ${fileName}${weiboUserId ? ` (用户ID: ${weiboUserId})` : ''}${weiboId ? ` (微博ID: ${weiboId})` : ''}`,
     };
   }
 
@@ -1047,7 +1142,7 @@ export class UploadService {
             tagIds: dto.tagIds,
             source: 'WEIBO_CRAWL',
             originalCreatedAt: dto.originalCreatedAt,
-            sourceMetadata: dto.sourceMetadata
+            sourceMetadata: dto.sourceMetadata,
           },
           user_id: userId,
         },
@@ -1068,7 +1163,12 @@ export class UploadService {
   /**
    * 直接上传weibo文件
    */
-  private async uploadWeiboFileDirectly(uploadId: string, fileBuffer: Buffer, fileMd5: string, userId: number): Promise<void> {
+  private async uploadWeiboFileDirectly(
+    uploadId: string,
+    fileBuffer: Buffer,
+    fileMd5: string,
+    userId: number,
+  ): Promise<void> {
     try {
       const chunkSize = 5 * 1024 * 1024; // 5MB
       const totalChunks = Math.ceil(fileBuffer.length / chunkSize);
@@ -1098,7 +1198,6 @@ export class UploadService {
 
       // 合并分片
       await this.mergeChunks({ uploadId, fileMd5 }, userId);
-
     } catch (error) {
       this.logger.error(`直接上传文件失败:`, error);
       throw error;
@@ -1106,9 +1205,13 @@ export class UploadService {
   }
 
   /**
- * 预览weibo文件（安全版本）
- */
-  async previewWeiboFile(fileId: string, userId: number, res: any): Promise<void> {
+   * 预览weibo文件（安全版本）
+   */
+  async previewWeiboFile(
+    fileId: string,
+    userId: number,
+    res: any,
+  ): Promise<void> {
     try {
       // 验证fileId格式
       if (!fileId || typeof fileId !== 'string') {
@@ -1154,7 +1257,6 @@ export class UploadService {
       });
 
       fileStream.pipe(res);
-
     } catch (error) {
       this.logger.error('预览文件失败:', error);
       if (!res.headersSent) {
@@ -1166,7 +1268,10 @@ export class UploadService {
   /**
    * 获取weibo文件信息（用于预览）- 安全版本
    */
-  private async getWeiboFileInfoForPreview(fileId: string, userId: number): Promise<{ path: string; name: string } | null> {
+  private async getWeiboFileInfoForPreview(
+    fileId: string,
+    userId: number,
+  ): Promise<{ path: string; name: string } | null> {
     try {
       // 从内存缓存或数据库中获取文件信息
       // 这里使用一个更安全的方式：通过UUID映射到实际路径
@@ -1188,7 +1293,7 @@ export class UploadService {
 
       return {
         path: fileInfo.path,
-        name: fileInfo.name
+        name: fileInfo.name,
       };
     } catch (error) {
       this.logger.error('获取文件信息失败:', error);
