@@ -1,13 +1,15 @@
 import {
-  Controller,
-  Post,
   Body,
+  Controller,
   Get,
-  Put,
   Param,
-  UseGuards,
+  Post,
+  Put,
   Request,
   Req,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { UserService } from '../services/user.service';
 import { AuthService } from '../services/auth.service';
@@ -21,12 +23,25 @@ import {
 } from '../dto/user-response.dto';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import {
-  ApiTags,
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiOperation,
   ApiResponse,
-  ApiBearerAuth,
+  ApiTags,
 } from '@nestjs/swagger';
 import { LoginLogService } from '../../logs/services/login-log.service';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { Express } from 'express';
+import { AVATAR_MAX_SIZE } from '../services/user.service';
+
+const avatarUploadOptions = {
+  storage: memoryStorage(),
+  limits: {
+    fileSize: AVATAR_MAX_SIZE,
+  },
+};
 
 @ApiTags('用户')
 @Controller('users')
@@ -123,6 +138,34 @@ export class UserController {
   @ApiResponse({ status: 409, description: '用户名或邮箱已被使用' })
   async updateProfile(@Request() req, @Body() updateUserDto: UpdateUserDto) {
     const user = await this.userService.updateUser(req.user.id, updateUserDto);
+    return new UserResponseDto(user);
+  }
+
+  @Post('profile/avatar')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(FileInterceptor('avatar', avatarUploadOptions))
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        avatar: {
+          type: 'string',
+          format: 'binary',
+          description: '头像图片文件（JPG/PNG/WebP，<=2MB）',
+        },
+      },
+      required: ['avatar'],
+    },
+  })
+  @ApiOperation({ summary: '上传并更新用户头像' })
+  @ApiResponse({ status: 200, description: '头像更新成功', type: UserResponseDto })
+  async uploadAvatar(
+    @Request() req,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    const user = await this.userService.updateAvatar(req.user.id, file);
     return new UserResponseDto(user);
   }
 

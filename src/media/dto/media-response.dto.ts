@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { MediaType, MediaStatus } from '@prisma/client';
 import { Transform } from 'class-transformer';
+import { convertToAccessibleUrl } from '../utils/media-path.util';
 
 export class MediaUserDto {
   @ApiProperty({ description: '用户UUID' })
@@ -102,7 +103,7 @@ export class MediaResponseDto {
   original_file_url?: string;
 
   @ApiProperty({
-    description: '原始创建时间（微博发布时间等）',
+    description: '原始创建时间（来源平台发布时间等）',
     required: false,
   })
   @Transform(({ value }) => (value ? new Date(value).toISOString() : null))
@@ -157,9 +158,9 @@ export class MediaResponseDto {
     this.description = media.description;
 
     // 修复URL路径 - 转换为完整的可访问URL
-    this.url = this.convertToAccessibleUrl(media.url);
+    this.url = convertToAccessibleUrl(media.url);
     this.thumbnail_url = media.thumbnail_url
-      ? this.convertToAccessibleUrl(media.thumbnail_url)
+      ? convertToAccessibleUrl(media.thumbnail_url)
       : undefined;
 
     this.size = media.size;
@@ -177,7 +178,7 @@ export class MediaResponseDto {
     const originalFileUrl =
       media.source_metadata?.original_file_url || media.url;
     this.original_file_url = originalFileUrl
-      ? this.convertToAccessibleUrl(originalFileUrl)
+      ? convertToAccessibleUrl(originalFileUrl)
       : undefined;
 
     // 直接赋值，让@Transform装饰器处理序列化
@@ -221,66 +222,13 @@ export class MediaResponseDto {
       media.video_qualities?.map((quality: any) => ({
         id: quality.id,
         quality: quality.quality,
-        url: this.convertToAccessibleUrl(quality.url), // 🔑 关键：也要转换video_qualities的URL
+        url: convertToAccessibleUrl(quality.url), // 🔑 关键：也要转换video_qualities的URL
         size: quality.size,
         width: quality.width,
         height: quality.height,
       })) || [];
   }
 
-  /**
-   * 将相对路径转换为完整的可访问URL
-   * 从 "uploads/image/xxx.jpg" 转换为 "http://localhost:3000/api/upload/file/image/xxx.jpg"
-   */
-  private convertToAccessibleUrl(relativePath: string): string {
-    if (!relativePath) return '';
-
-    const cleanPath = relativePath.trim();
-
-    const extractProcessed = (path: string): string => {
-      const match = path.match(/processed\/.+$/);
-      if (match) {
-        return `/${match[0]}`;
-      }
-      return '';
-    };
-
-    // 已经是完整URL
-    if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) {
-      const processedPath = extractProcessed(cleanPath);
-      if (processedPath) {
-        return processedPath;
-      }
-      return cleanPath;
-    }
-
-    // 已经是 /processed 路径
-    if (cleanPath.startsWith('/processed/')) {
-      return cleanPath;
-    }
-    if (cleanPath.startsWith('processed/')) {
-      return `/${cleanPath}`;
-    }
-
-    // API 路径，可能包含 processed
-    if (cleanPath.startsWith('/api/upload/file/processed/')) {
-      const processedPath = cleanPath.replace('/api/upload/file', '');
-      return processedPath.startsWith('/')
-        ? processedPath
-        : `/${processedPath}`;
-    }
-
-    if (cleanPath.startsWith('uploads/')) {
-      const uploadPath = cleanPath.substring('uploads/'.length);
-      return `/api/upload/file/${uploadPath}`;
-    }
-
-    if (cleanPath.startsWith('/api/upload/file/')) {
-      return cleanPath;
-    }
-
-    return `/api/upload/file/${cleanPath}`;
-  }
 }
 
 export class MediaListResponseDto {

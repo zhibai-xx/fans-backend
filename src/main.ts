@@ -4,6 +4,11 @@ import { AllExceptionsFilter } from './all-exceptions.filter';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import {
+  ensureUploadStructure,
+  migrateLegacyProcessedDirectory,
+  PROCESSED_ROOT,
+} from './common/utils/storage-path.util';
 
 async function bootstrap() {
   // 设置时区为中国标准时间 (UTC+8)
@@ -88,8 +93,14 @@ async function bootstrap() {
     exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length'], // 暴露视频播放需要的头
     credentials: true,
   });
+  await ensureUploadStructure();
+  await migrateLegacyProcessedDirectory({
+    log: (msg: string) => console.log(msg),
+    warn: (msg: string) => console.warn(msg),
+  });
+
   // 设置静态文件服务 - processed文件夹
-  app.useStaticAssets('processed', {
+  app.useStaticAssets(PROCESSED_ROOT, {
     prefix: '/processed/',
   });
 

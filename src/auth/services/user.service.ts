@@ -3,7 +3,11 @@ import {
   ConflictException,
   NotFoundException,
   UnauthorizedException,
+  BadRequestException,
+  InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from 'src/database/database.service';
 import { RegisterDto } from '../dto/register.dto';
 import { LoginDto } from '../dto/login.dto';
@@ -11,10 +15,38 @@ import { UpdateUserDto } from '../dto/update-user.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
 import * as bcrypt from 'bcrypt';
 import { Prisma } from '@prisma/client';
+import * as path from 'path';
+import { promises as fsPromises } from 'fs';
+import * as Sharp from 'sharp';
+
+const sharp = ((Sharp as any).default || Sharp) as typeof import('sharp');
+
+const AVATAR_API_PREFIX = '/api/upload/file/avatars';
+const DEFAULT_AVATAR_URL = `${AVATAR_API_PREFIX}/default.webp`;
+const ALLOWED_AVATAR_MIME = ['image/jpeg', 'image/png', 'image/webp'];
+export const AVATAR_MAX_SIZE = 2 * 1024 * 1024; // 2MB
 
 @Injectable()
 export class UserService {
-  constructor(private readonly databaseService: DatabaseService) {}
+  private readonly logger = new Logger(UserService.name);
+  private readonly uploadRoot: string;
+  private readonly avatarDir: string;
+  private readonly avatarDirReady: Promise<void>;
+
+  constructor(
+    private readonly databaseService: DatabaseService,
+    private readonly configService: ConfigService,
+  ) {
+    const configuredUploadRoot =
+      this.configService.get<string>('UPLOAD_DIR') ||
+      path.resolve(__dirname, '../../../../uploads');
+
+    this.uploadRoot = path.isAbsolute(configuredUploadRoot)
+      ? configuredUploadRoot
+      : path.resolve(process.cwd(), configuredUploadRoot);
+    this.avatarDir = path.join(this.uploadRoot, 'avatars');
+    this.avatarDirReady = this.ensureAvatarDirectory();
+  }
 
   async register(registerDto: RegisterDto) {
     const { username, email, password, nickname } = registerDto;
@@ -34,10 +66,11 @@ export class UserService {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // 构建用户数据
-    const userData = {
+    const userData: Prisma.UserCreateInput = {
       username,
       email,
       password: hashedPassword,
+      avatar_url: null,
     };
 
     // 如果昵称存在则添加到数据中
@@ -112,7 +145,6 @@ export class UserService {
 
     if (updateUserDto.username) updateData.username = updateUserDto.username;
     if (updateUserDto.email) updateData.email = updateUserDto.email;
-    if (updateUserDto.avatar) updateData.avatar_url = updateUserDto.avatar;
     if (updateUserDto.nickname !== undefined)
       updateData.nickname = updateUserDto.nickname;
     if (updateUserDto.phoneNumber !== undefined)
@@ -195,6 +227,103 @@ export class UserService {
       where: { id: userId },
       data: { password: hashedNewPassword },
     });
+  }
+
+  async updateAvatar(userId: number, file: Express.Multer.File) {
+    await this.avatarDirReady;
+
+    if (!file) {
+      throw new BadRequestException('请上传头像文件');
+    }
+
+    if (file.size > AVATAR_MAX_SIZE) {
+      throw new BadRequestException('头像大小不能超过 2MB');
+    }
+
+    if (!ALLOWED_AVATAR_MIME.includes(file.mimetype)) {
+      throw new BadRequestException('仅支持 JPG、PNG 或 WebP 格式的头像');
+    }
+
+    const user = await this.databaseService.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('用户不存在');
+    }
+
+    const versionSuffix = Date.now();
+    const fileName = `${user.uuid || user.id}_${versionSuffix}.webp`;
+    const filePath = path.join(this.avatarDir, fileName);
+
+    try {
+      await sharp(file.buffer)
+        .rotate()
+        .resize(512, 512, { fit: sharp.fit.cover })
+        .toFormat('webp', { quality: 85 })
+        .toFile(filePath);
+    } catch (error) {
+      this.logger.error(
+        `头像处理失败: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+      throw new InternalServerErrorException('头像处理失败，请稍后重试');
+    }
+
+    if (
+      user.avatar_url &&
+      user.avatar_url !== DEFAULT_AVATAR_URL &&
+      user.avatar_url !== `${AVATAR_API_PREFIX}/${fileName}`
+    ) {
+      await this.removeAvatarFile(user.avatar_url);
+    }
+
+    const avatarUrl = `${AVATAR_API_PREFIX}/${fileName}`;
+
+    return this.databaseService.user.update({
+      where: { id: userId },
+      data: { avatar_url: avatarUrl },
+    });
+  }
+
+  private async ensureAvatarDirectory() {
+    try {
+      await fsPromises.mkdir(this.avatarDir, { recursive: true });
+      const defaultPath = path.join(this.avatarDir, 'default.webp');
+      try {
+        await fsPromises.access(defaultPath);
+      } catch {
+        await sharp({
+          create: {
+            width: 256,
+            height: 256,
+            channels: 4,
+            background: { r: 229, g: 231, b: 235, alpha: 1 },
+          },
+        })
+          .webp({ quality: 90 })
+          .toFile(defaultPath);
+      }
+    } catch (error) {
+      this.logger.error(
+        `初始化头像目录失败: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+    }
+  }
+
+  private async removeAvatarFile(avatarUrl: string) {
+    if (!avatarUrl.startsWith(AVATAR_API_PREFIX)) {
+      return;
+    }
+    const fileName = avatarUrl.replace(`${AVATAR_API_PREFIX}/`, '');
+    const filePath = path.join(this.avatarDir, fileName);
+    try {
+      await fsPromises.access(filePath);
+      await fsPromises.unlink(filePath);
+    } catch {
+      // ignore
+    }
   }
 
   // =====================================

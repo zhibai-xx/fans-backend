@@ -1,6 +1,15 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { UserRole, UserStatus } from '@prisma/client';
 
+const DEFAULT_AVATAR_URL = '/api/upload/file/avatars/default.webp';
+
+const normalizeAvatarUrl = (avatarUrl?: string | null) => {
+  if (!avatarUrl || avatarUrl === DEFAULT_AVATAR_URL) {
+    return undefined;
+  }
+  return avatarUrl;
+};
+
 export class UserResponseDto {
   @ApiProperty({ description: '用户ID（内部标识）' })
   id: number;
@@ -41,7 +50,7 @@ export class UserResponseDto {
     this.username = user.username;
     this.email = user.email;
     this.nickname = user.nickname;
-    this.avatar_url = user.avatar_url;
+    this.avatar_url = normalizeAvatarUrl(user.avatar_url);
     this.phoneNumber = user.phoneNumber;
     this.role = user.role;
     this.status = user.status;
@@ -73,7 +82,7 @@ export class PublicUserResponseDto {
     this.uuid = user.uuid;
     this.username = user.username;
     this.nickname = user.nickname;
-    this.avatar_url = user.avatar_url;
+    this.avatar_url = normalizeAvatarUrl(user.avatar_url);
     this.role = user.role;
     this.created_at = user.created_at;
   }

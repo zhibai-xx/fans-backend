@@ -27,7 +27,7 @@ model User {
   password     String                               // 加密后的密码
   phoneNumber  String?                              // 手机号（可选）
   nickname     String?                              // 昵称
-  avatar_url   String? @default("default_avatar.png") // 头像URL
+  avatar_url   String? @default("/api/upload/file/avatars/default.webp") // 头像URL
   role         UserRole @default(USER)              // 角色：USER/ADMIN
   status       UserStatus @default(ACTIVE)          // 状态：ACTIVE/SUSPENDED
   created_at   DateTime @default(now())
@@ -42,6 +42,7 @@ model User {
   reviewed_media Media[]  @relation("MediaReviewer") // 审核的媒体
   operation_logs OperationLog[] // 操作记录
   login_logs    LoginLog[]     // 登录记录
+  downloads     DownloadRecord[]
 
   @@index([username])
   @@index([email])
@@ -81,8 +82,8 @@ model Media {
   likes_count    Int      @default(0)           // 点赞数
   favorites_count Int     @default(0)           // 收藏数
   source         MediaSource @default(USER_UPLOAD) // 媒体来源
-  original_created_at DateTime?              // 原始创建时间（微博发布时间等）
-  source_metadata Json?                      // 来源相关元数据（微博ID、转发数等）
+  original_created_at DateTime?              // 原始创建时间（来源平台发布时间等）
+  source_metadata Json?                      // 来源相关元数据（外部ID、转发数等）
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
 
@@ -104,6 +105,7 @@ model Media {
   deleted_by  Int?                         // 删除操作者
   cleanup_scheduled_at DateTime?           // 计划清理时间
   recycle_logs MediaRecycleLog[]
+  downloads DownloadRecord[]
 
   @@index([user_id, status]) // 加速用户内容管理查询
   @@index([source, original_created_at]) // 加速按来源和原始时间查询
@@ -129,10 +131,10 @@ enum MediaVisibility {
 }
 
 enum MediaSource {
-  USER_UPLOAD  // 用户上传
-  WEIBO_CRAWL  // 微博爬取
-  API_IMPORT   // API导入
-  BATCH_IMPORT // 批量导入
+  USER_UPLOAD    // 用户上传
+  SYSTEM_INGEST  // 系统导入（统一替代 Playwright/API/脚本等方式）
+  ADMIN_UPLOAD   // 管理员手动上传
+  EXTERNAL_FEED  // 外部数据源导入（扩展接口）
 }
 
 enum MediaRecycleAction {
@@ -244,6 +246,26 @@ model Like {
 
   @@unique([user_id, media_id]) // 禁止重复点赞
   @@index([media_id, created_at]) // 按媒体和时间排序
+}
+
+// =====================================
+// DownloadRecord 下载记录
+// =====================================
+model DownloadRecord {
+  id         String    @id @default(uuid())
+  user_id    Int       @map("user_id")
+  media_id   String    @map("media_id")
+  media_type MediaType
+  file_name  String?   @db.VarChar(255)
+  file_type  String?   @db.VarChar(50)
+  file_size  Int?
+  created_at DateTime  @default(now())
+
+  user  User  @relation(fields: [user_id], references: [id])
+  media Media @relation(fields: [media_id], references: [id])
+
+  @@index([user_id, created_at])
+  @@index([media_id, created_at])
 }
 
 // 新增：视频清晰度模型

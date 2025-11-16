@@ -20,7 +20,7 @@ import {
   UploadProgressResponse,
   FileType,
 } from './dto/upload.dto';
-import { MediaType, Prisma } from '@prisma/client';
+import { MediaSource, MediaType, Prisma } from '@prisma/client';
 
 // 定义上传状态枚举
 enum UploadStatus {
@@ -52,7 +52,7 @@ export class UploadService {
   private readonly uploadDir: string;
   private readonly tempDir: string;
   private readonly chunkDir: string;
-  private readonly weiboFileCache = new Map<
+  private readonly systemIngestFileCache = new Map<
     string,
     { path: string; name: string; type: string }
   >();
@@ -213,10 +213,12 @@ export class UploadService {
   async initUpload(
     dto: InitUploadDto,
     userId: number,
+    userRole?: string,
   ): Promise<InitUploadResponse> {
     this.logger.log(
       `初始化上传: ${dto.filename}, MD5: ${dto.fileMd5}, userid: ${userId}`,
     );
+    const uploadSource = this.resolveUserUploadSource(userRole);
 
     // 检查并发限制
     if (this.activeUploads.size >= PERFORMANCE_CONFIG.MAX_CONCURRENT_UPLOADS) {
@@ -267,6 +269,7 @@ export class UploadService {
             description: dto.description,
             tagIds: dto.tagIds || [],
             categoryId: dto.categoryId,
+            source: uploadSource,
           },
           final_path: existingMedia.url,
           expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -320,6 +323,7 @@ export class UploadService {
           description: dto.description,
           tagIds: dto.tagIds || [],
           categoryId: dto.categoryId,
+          source: uploadSource,
         },
         expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
       },
@@ -515,6 +519,7 @@ export class UploadService {
 
       // 创建媒体记录
       const metadata = upload.metadata as any;
+      const resolvedSource = this.resolveMetadataSource(metadata);
       const sourceMetadata: Record<string, any> = {
         ...(metadata?.sourceMetadata ?? {}),
         ...(metadata?.source_metadata ?? {}),
@@ -559,6 +564,7 @@ export class UploadService {
         user_id: userId,
         category_id: metadata.categoryId,
         tag_ids: tagIds,
+        source: resolvedSource,
         source_metadata:
           Object.keys(sourceMetadata).length > 0 ? sourceMetadata : undefined,
       });
@@ -693,12 +699,13 @@ export class UploadService {
   async batchInitUpload(
     files: InitUploadDto[],
     userId: number,
+    userRole?: string,
   ): Promise<InitUploadResponse[]> {
     const results: InitUploadResponse[] = [];
 
     for (const file of files) {
       try {
-        const result = await this.initUpload(file, userId);
+        const result = await this.initUpload(file, userId, userRole);
         results.push(result);
       } catch (error) {
         this.logger.error(
@@ -786,6 +793,25 @@ export class UploadService {
     return tagIds;
   }
 
+  private resolveUserUploadSource(userRole?: string): MediaSource {
+    return userRole === 'ADMIN'
+      ? MediaSource.ADMIN_UPLOAD
+      : MediaSource.USER_UPLOAD;
+  }
+
+  private resolveMetadataSource(
+    metadata?: Record<string, any>,
+  ): MediaSource {
+    const candidate = metadata?.source;
+    if (
+      typeof candidate === 'string' &&
+      (Object.values(MediaSource) as string[]).includes(candidate)
+    ) {
+      return candidate as MediaSource;
+    }
+    return MediaSource.USER_UPLOAD;
+  }
+
   /**
    * 清理过期的上传记录
    */
@@ -819,22 +845,22 @@ export class UploadService {
   }
 
   /**
-   * 扫描weibo文件夹
+   * 扫描系统导入目录
    */
-  async scanWeiboDirectory(customPath?: string): Promise<any> {
-    this.logger.log('开始扫描weibo文件夹...');
+  async scanSystemIngestDirectory(customPath?: string): Promise<any> {
+    this.logger.log('开始扫描系统导入目录...');
 
     // 使用用户指定的路径或默认路径
-    const weiboBasePath =
-      customPath || path.join(process.cwd(), 'scripts/weibo-crawler/weibo');
+    const systemIngestBasePath =
+      customPath || path.join(process.cwd(), 'scripts/system-ingest');
 
     // 安全检查：防止目录遍历攻击
     if (customPath && (customPath.includes('..') || customPath.includes('~'))) {
       throw new Error('无效的路径：不允许使用相对路径');
     }
 
-    if (!(await fs.pathExists(weiboBasePath))) {
-      throw new Error(`weibo文件夹不存在: ${weiboBasePath}`);
+    if (!(await fs.pathExists(systemIngestBasePath))) {
+      throw new Error(`系统导入目录不存在: ${systemIngestBasePath}`);
     }
 
     const users: any[] = [];
@@ -842,12 +868,12 @@ export class UploadService {
     let totalSize = 0;
 
     try {
-      const userDirs = await fs.readdir(weiboBasePath);
+      const userDirs = await fs.readdir(systemIngestBasePath);
 
       for (const userDir of userDirs) {
         if (userDir.startsWith('.')) continue;
 
-        const userPath = path.join(weiboBasePath, userDir);
+        const userPath = path.join(systemIngestBasePath, userDir);
         const stat = await fs.stat(userPath);
 
         if (stat.isDirectory()) {
@@ -879,7 +905,7 @@ export class UploadService {
         totalSize,
       };
     } catch (error) {
-      this.logger.error('扫描weibo文件夹失败:', error);
+      this.logger.error('扫描系统导入目录失败:', error);
       throw error;
     }
   }
@@ -899,13 +925,16 @@ export class UploadService {
       for (const entry of entries) {
         if (entry.isFile()) {
           const filePath = path.join(userPath, entry.name);
-          const fileInfo = await this.getWeiboFileInfo(filePath, entry.name);
+          const fileInfo = await this.getSystemIngestFileInfo(
+            filePath,
+            entry.name,
+          );
 
           if (fileInfo) {
             const fileId = uuidv4();
 
             // 将文件信息添加到缓存中，用于安全预览
-            this.weiboFileCache.set(fileId, {
+            this.systemIngestFileCache.set(fileId, {
               path: filePath,
               name: entry.name,
               type: fileInfo.type,
@@ -935,9 +964,9 @@ export class UploadService {
   }
 
   /**
-   * 获取weibo文件信息
+   * 获取系统导入文件信息
    */
-  private async getWeiboFileInfo(
+  private async getSystemIngestFileInfo(
     filePath: string,
     fileName: string,
   ): Promise<any> {
@@ -968,20 +997,32 @@ export class UploadService {
   }
 
   /**
-   * 批量上传weibo文件
+   * 批量上传系统导入文件
    */
-  async batchUploadWeiboFiles(
-    selectedFilePaths: string[],
+  async batchUploadSystemIngestFiles(
+    selectedFiles: Array<
+      string | { path: string; name?: string; userId?: string }
+    >,
     userId: number,
   ): Promise<any> {
-    this.logger.log(`开始批量上传 ${selectedFilePaths.length} 个文件`);
+    this.logger.log(`开始批量上传 ${selectedFiles.length} 个文件`);
 
     const results: any[] = [];
 
-    for (const filePath of selectedFilePaths) {
+    for (const fileEntry of selectedFiles) {
+      let filePath: string | undefined;
+      let fileName: string | undefined;
       try {
-        const fileName = path.basename(filePath);
-        const fileInfo = await this.getWeiboFileInfo(filePath, fileName);
+        filePath =
+          typeof fileEntry === 'string' ? fileEntry : fileEntry.path;
+        fileName =
+          typeof fileEntry === 'string'
+            ? path.basename(fileEntry)
+            : fileEntry.name || path.basename(fileEntry.path);
+        const fileInfo = await this.getSystemIngestFileInfo(
+          filePath,
+          fileName,
+        );
 
         if (!fileInfo) {
           results.push({
@@ -992,8 +1033,12 @@ export class UploadService {
           continue;
         }
 
-        // 解析微博信息
-        const weiboInfo = this.parseWeiboInfo(filePath, fileName);
+        // 解析系统导入元数据
+        const ingestInfo = this.parseSystemIngestInfo(
+          filePath,
+          fileName,
+          typeof fileEntry === 'string' ? undefined : fileEntry.userId,
+        );
 
         // 读取文件内容
         const fileBuffer = await fs.readFile(filePath);
@@ -1002,21 +1047,21 @@ export class UploadService {
           .update(fileBuffer)
           .digest('hex');
 
-        // 创建上传任务（包含微博元数据）
-        const uploadResult = await this.initWeiboUpload(
+        // 创建上传任务（包含系统导入元数据）
+        const uploadResult = await this.initSystemIngestUpload(
           {
             filename: fileName,
             fileSize: fileInfo.size,
             fileType:
               fileInfo.type === 'video' ? FileType.VIDEO : FileType.IMAGE,
             fileMd5,
-            title: weiboInfo.title || fileName,
+            title: ingestInfo.title || fileName,
             description:
-              weiboInfo.description || `从weibo-crawler导入: ${fileName}`,
+              ingestInfo.description || `系统导入文件: ${fileName}`,
             tagIds: [],
-            weiboUserId: weiboInfo.weiboUserId,
-            originalCreatedAt: weiboInfo.originalCreatedAt,
-            sourceMetadata: weiboInfo.sourceMetadata,
+            ingestUserId: ingestInfo.ingestUserId,
+            originalCreatedAt: ingestInfo.originalCreatedAt,
+            sourceMetadata: ingestInfo.sourceMetadata,
           },
           userId,
         );
@@ -1032,7 +1077,7 @@ export class UploadService {
 
         // 如果需要上传，直接上传文件
         if (uploadResult.needUpload) {
-          await this.uploadWeiboFileDirectly(
+          await this.uploadSystemIngestFileDirectly(
             uploadResult.uploadId,
             fileBuffer,
             fileMd5,
@@ -1040,7 +1085,10 @@ export class UploadService {
           );
         }
       } catch (error) {
-        this.logger.error(`上传文件失败 ${filePath}:`, error);
+        this.logger.error(
+          `上传文件失败 ${filePath || '未知路径'}:`,
+          error,
+        );
         results.push({
           filePath,
           success: false,
@@ -1053,71 +1101,73 @@ export class UploadService {
   }
 
   /**
-   * 解析微博信息
+   * 解析系统导入文件的元数据
    */
-  private parseWeiboInfo(filePath: string, fileName: string): any {
-    // 从文件路径中提取微博用户ID（例如：weibo/6387099968/xxxxx.jpg）
+  private parseSystemIngestInfo(
+    filePath: string,
+    fileName: string,
+    userHint?: string,
+  ): any {
     const pathParts = filePath.split(path.sep);
-    const weiboIndex = pathParts.findIndex((part) => part === 'weibo');
 
-    let weiboUserId: string | null = null;
-    if (weiboIndex >= 0 && weiboIndex < pathParts.length - 1) {
-      weiboUserId = pathParts[weiboIndex + 1];
-    }
+    // 识别可能的来源用户 ID（优先匹配纯数字目录）
+    const ingestUserId =
+      userHint || pathParts.find((part) => /^\d{5,}$/.test(part)) || null;
 
-    // 从文件名中提取时间和微博ID信息
-    // 文件名格式：20250618T_5178828026545249_1.jpg
+    // 从文件名中提取时间与来源内容 ID，文件名格式：20250618T_5178828026545249_1.jpg
     let originalCreatedAt: Date | null = null;
-    let weiboId: string | null = null;
+    let ingestContentId: string | null = null;
 
-    // 解析文件名中的日期和微博ID
-    const weiboFileMatch = fileName.match(/(\d{8})T_(\d+)_\d+\./);
-    if (weiboFileMatch) {
-      const dateStr = weiboFileMatch[1]; // 20250618
-      weiboId = weiboFileMatch[2]; // 5178828026545249
+    const ingestFileMatch = fileName.match(/(\d{8})T_(\d+)_\d+\./);
+    if (ingestFileMatch) {
+      const dateStr = ingestFileMatch[1];
+      ingestContentId = ingestFileMatch[2];
 
-      // 转换日期格式
       const year = dateStr.substring(0, 4);
       const month = dateStr.substring(4, 6);
       const day = dateStr.substring(6, 8);
       originalCreatedAt = new Date(`${year}-${month}-${day}`);
     }
 
-    // 判断媒体类型和分类
-    let mediaCategory = '未分类';
-    if (filePath.includes('原创微博图片')) {
-      mediaCategory = '原创微博图片';
-    } else if (filePath.includes('video')) {
-      mediaCategory = '微博视频';
-    } else if (filePath.includes('live_photo')) {
-      mediaCategory = '微博Live Photo';
+    // 判断媒体分类
+    let mediaCategory = 'general';
+    if (filePath.toLowerCase().includes('original')) {
+      mediaCategory = 'original';
+    } else if (filePath.toLowerCase().includes('video')) {
+      mediaCategory = 'video';
+    } else if (filePath.toLowerCase().includes('live')) {
+      mediaCategory = 'live';
     }
 
-    // 构建元数据
     const sourceMetadata = {
-      weiboUserId,
-      weiboId,
+      ingestUserId,
+      ingestContentId,
       originalPath: filePath,
-      crawlSource: 'weibo-crawler',
+      sourcePipeline: 'system-ingest',
       mediaCategory,
       importedAt: new Date().toISOString(),
     };
 
     return {
-      weiboUserId,
+      ingestUserId,
       originalCreatedAt,
       sourceMetadata,
-      title: weiboUserId
-        ? `微博用户${weiboUserId}的${mediaCategory}`
+      title: ingestUserId
+        ? `系统导入用户 ${ingestUserId} 的 ${mediaCategory}`
         : fileName,
-      description: `从weibo-crawler导入的${mediaCategory}: ${fileName}${weiboUserId ? ` (用户ID: ${weiboUserId})` : ''}${weiboId ? ` (微博ID: ${weiboId})` : ''}`,
+      description: `系统导入的${mediaCategory}: ${fileName}${
+        ingestUserId ? ` (来源用户: ${ingestUserId})` : ''
+      }${ingestContentId ? ` (来源ID: ${ingestContentId})` : ''}`,
     };
   }
 
   /**
-   * 初始化微博上传
+   * 初始化系统导入上传
    */
-  private async initWeiboUpload(dto: any, userId: number): Promise<any> {
+  private async initSystemIngestUpload(
+    dto: any,
+    userId: number,
+  ): Promise<any> {
     try {
       // 检查是否已存在相同文件
       const existingUpload = await this.checkInstantUpload(dto.fileMd5, userId);
@@ -1140,7 +1190,7 @@ export class UploadService {
             title: dto.title,
             description: dto.description,
             tagIds: dto.tagIds,
-            source: 'WEIBO_CRAWL',
+            source: MediaSource.SYSTEM_INGEST,
             originalCreatedAt: dto.originalCreatedAt,
             sourceMetadata: dto.sourceMetadata,
           },
@@ -1155,15 +1205,15 @@ export class UploadService {
         totalChunks: upload.total_chunks,
       };
     } catch (error) {
-      this.logger.error('初始化微博上传失败:', error);
+      this.logger.error('初始化系统导入上传失败:', error);
       throw error;
     }
   }
 
   /**
-   * 直接上传weibo文件
+   * 直接上传系统导入文件
    */
-  private async uploadWeiboFileDirectly(
+  private async uploadSystemIngestFileDirectly(
     uploadId: string,
     fileBuffer: Buffer,
     fileMd5: string,
@@ -1205,9 +1255,9 @@ export class UploadService {
   }
 
   /**
-   * 预览weibo文件（安全版本）
+   * 预览系统导入文件（安全版本）
    */
-  async previewWeiboFile(
+  async previewSystemIngestFile(
     fileId: string,
     userId: number,
     res: any,
@@ -1219,7 +1269,10 @@ export class UploadService {
       }
 
       // 从临时存储中获取文件信息
-      const fileInfo = await this.getWeiboFileInfoForPreview(fileId, userId);
+      const fileInfo = await this.getSystemIngestFileInfoForPreview(
+        fileId,
+        userId,
+      );
       if (!fileInfo) {
         throw new Error('文件不存在或无权访问');
       }
@@ -1266,23 +1319,23 @@ export class UploadService {
   }
 
   /**
-   * 获取weibo文件信息（用于预览）- 安全版本
+   * 获取系统导入文件信息（用于预览）- 安全版本
    */
-  private async getWeiboFileInfoForPreview(
+  private async getSystemIngestFileInfoForPreview(
     fileId: string,
     userId: number,
   ): Promise<{ path: string; name: string } | null> {
     try {
       // 从内存缓存或数据库中获取文件信息
       // 这里使用一个更安全的方式：通过UUID映射到实际路径
-      const fileInfo = this.weiboFileCache.get(fileId);
+      const fileInfo = this.systemIngestFileCache.get(fileId);
       if (!fileInfo) {
         this.logger.warn(`文件ID ${fileId} 不存在于缓存中`);
         return null;
       }
 
       // 验证用户权限（可选，根据业务需求）
-      // 这里暂时跳过用户权限检查，因为weibo文件预览不需要严格的用户隔离
+      // 这里暂时跳过用户权限检查，因为系统导入文件预览不需要严格的用户隔离
 
       // 检查文件是否真实存在
       const fileExists = await fs.pathExists(fileInfo.path);

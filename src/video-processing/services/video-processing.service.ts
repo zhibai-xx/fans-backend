@@ -9,6 +9,11 @@ import { HlsService } from './hls.service';
 import { ThumbnailService } from './thumbnail.service';
 import * as path from 'path';
 import * as fs from 'fs-extra';
+import {
+  getProcessedMediaDir,
+  PROCESSED_ROOT,
+  LEGACY_PROCESSED_ROOT,
+} from '../../common/utils/storage-path.util';
 
 export interface VideoProcessingJob {
   mediaId: string;
@@ -751,7 +756,7 @@ export class VideoProcessingService {
       this.logger.log(`🗑️ 开始清理视频处理文件: ${mediaId}`);
 
       // 构建处理文件目录路径
-      const processedDir = path.join(process.cwd(), 'processed', mediaId);
+      const processedDir = getProcessedMediaDir(mediaId);
 
       this.logger.debug(`检查处理目录: ${processedDir}`);
 
@@ -765,7 +770,7 @@ export class VideoProcessingService {
 
       // 额外检查和清理可能的其他位置
       const alternativePaths = [
-        path.join(process.cwd(), 'uploads', 'processed', mediaId),
+        path.join(LEGACY_PROCESSED_ROOT, mediaId),
         path.join(process.cwd(), 'public', 'processed', mediaId),
       ];
 

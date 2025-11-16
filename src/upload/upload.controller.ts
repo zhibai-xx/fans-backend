@@ -67,8 +67,9 @@ export class UploadController {
     @Req() req: Request,
   ): Promise<InitUploadResponse> {
     const userId = (req.user as any).id;
+    const userRole = (req.user as any).role;
     this.logger.log(`用户 ${userId} 初始化上传: ${dto.filename}`);
-    return this.uploadService.initUpload(dto, userId);
+    return this.uploadService.initUpload(dto, userId, userRole);
   }
 
   /**
@@ -85,10 +86,11 @@ export class UploadController {
     @Req() req: Request,
   ): Promise<InitUploadResponse[]> {
     const userId = (req.user as any).id;
+    const userRole = (req.user as any).role;
     this.logger.log(
       `用户 ${userId} 批量初始化上传: ${dto.files.length} 个文件`,
     );
-    return this.uploadService.batchInitUpload(dto.files, userId);
+    return this.uploadService.batchInitUpload(dto.files, userId, userRole);
   }
 
   /**
@@ -220,16 +222,16 @@ export class UploadController {
   }
 
   /**
-   * 扫描weibo文件夹（仅管理员）
+   * 扫描系统导入目录（仅管理员）
    */
-  @Post('weibo-scan')
+  @Post('system-ingest/scan')
   @UseGuards(JwtAuthGuard, AdminRoleGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: '扫描weibo文件夹中的媒体文件（仅管理员）' })
+  @ApiOperation({ summary: '扫描系统导入目录中的媒体文件（仅管理员）' })
   @ApiResponse({ status: 200, description: '扫描成功' })
   @ApiResponse({ status: 401, description: '未授权' })
   @ApiResponse({ status: 403, description: '需要管理员权限' })
-  async scanWeiboFiles(
+  async scanSystemIngestFiles(
     @Body() body: { customPath?: string },
     @Req() req: Request,
   ) {
@@ -237,9 +239,9 @@ export class UploadController {
       const userId = (req.user as any).id;
       const userRole = (req.user as any).role;
       this.logger.log(
-        `管理员 ${userId} (${userRole}) 扫描weibo文件夹: ${body.customPath || '默认路径'}`,
+        `管理员 ${userId} (${userRole}) 扫描系统导入目录: ${body.customPath || '默认路径'}`,
       );
-      const result = await this.uploadService.scanWeiboDirectory(
+      const result = await this.uploadService.scanSystemIngestDirectory(
         body.customPath,
       );
       return {
@@ -247,26 +249,26 @@ export class UploadController {
         data: result,
       };
     } catch (error) {
-      this.logger.error('扫描weibo文件夹失败:', error);
-      throw new Error('扫描weibo文件夹失败');
+      this.logger.error('扫描系统导入目录失败:', error);
+      throw new Error('扫描系统导入目录失败');
     }
   }
 
   /**
-   * 预览weibo文件（仅管理员）
+   * 预览系统导入文件（仅管理员）
    */
-  @Get('weibo-preview/:fileId')
+  @Get('system-ingest/preview/:fileId')
   @UseGuards(JwtAuthGuard, AdminRoleGuard)
   @ApiBearerAuth()
   @Throttle({
     short: { limit: 50, ttl: 1000 },
     long: { limit: 500, ttl: 60000 },
   })
-  @ApiOperation({ summary: '预览weibo文件（仅管理员）' })
+  @ApiOperation({ summary: '预览系统导入文件（仅管理员）' })
   @ApiResponse({ status: 200, description: '预览成功' })
   @ApiResponse({ status: 401, description: '未授权' })
   @ApiResponse({ status: 403, description: '需要管理员权限' })
-  async previewWeiboFile(
+  async previewSystemIngestFile(
     @Param('fileId') fileId: string,
     @Req() req: Request,
     @Res() res: Response,
@@ -275,10 +277,10 @@ export class UploadController {
       const userId = (req.user as any).id;
       const userRole = (req.user as any).role;
       this.logger.log(
-        `管理员 ${userId} (${userRole}) 预览weibo文件: ${fileId}`,
+        `管理员 ${userId} (${userRole}) 预览系统导入文件: ${fileId}`,
       );
 
-      await this.uploadService.previewWeiboFile(fileId, userId, res);
+      await this.uploadService.previewSystemIngestFile(fileId, userId, res);
     } catch (error) {
       this.logger.error('预览文件失败:', error);
       res.status(404).json({ error: '文件预览失败' });
@@ -286,27 +288,37 @@ export class UploadController {
   }
 
   /**
-   * 批量上传weibo文件（仅管理员）
+   * 批量上传系统导入文件（仅管理员）
    */
-  @Post('weibo-batch-upload')
+  @Post('system-ingest/batch-upload')
   @UseGuards(JwtAuthGuard, AdminRoleGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: '批量上传weibo文件（仅管理员）' })
+  @ApiOperation({ summary: '批量上传系统导入文件（仅管理员）' })
   @ApiResponse({ status: 200, description: '批量上传成功' })
   @ApiResponse({ status: 401, description: '未授权' })
   @ApiResponse({ status: 403, description: '需要管理员权限' })
-  async batchUploadWeiboFiles(
-    @Body() body: { selectedFiles: string[] },
+  async batchUploadSystemIngestFiles(
+    @Body()
+    body: {
+      selectedFiles: Array<
+        string | { path: string; name?: string; userId?: string }
+      >;
+    },
     @Req() req: Request,
   ) {
     try {
       const userId = (req.user as any).id;
       const userRole = (req.user as any).role;
       this.logger.log(
-        `管理员 ${userId} (${userRole}) 批量上传weibo文件: ${body.selectedFiles.length} 个文件`,
+        `管理员 ${userId} (${userRole}) 批量上传系统导入文件: ${body.selectedFiles.length} 个文件`,
       );
-      const result = await this.uploadService.batchUploadWeiboFiles(
-        body.selectedFiles,
+      const normalizedFiles = body.selectedFiles.map((file) =>
+        typeof file === 'string'
+          ? { path: file }
+          : { path: file.path, name: file.name, userId: file.userId },
+      );
+      const result = await this.uploadService.batchUploadSystemIngestFiles(
+        normalizedFiles,
         userId,
       );
       return {

@@ -24,15 +24,6 @@ export class UpdateUserDto {
   @IsEmail({}, { message: '邮箱格式不正确' })
   email?: string;
 
-  @ApiProperty({
-    description: '头像',
-    example: 'https://example.com/avatar.jpg',
-    required: false,
-  })
-  @IsOptional()
-  @IsString({ message: '头像必须是字符串' })
-  avatar?: string;
-
   // @ApiProperty({ description: '个人简介', example: '这是我的个人简介', required: false })
   // @IsOptional()
   // @IsString({ message: '个人简介必须是字符串' })

@@ -14,6 +14,7 @@ import {
   MediaStatus,
   Prisma,
   MediaRecycleAction,
+  MediaSource,
 } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from 'src/database/database.service';
@@ -37,6 +38,11 @@ import { ThumbnailService } from 'src/video-processing/services/thumbnail.servic
 import { EnhancedDeletionService } from './services/enhanced-deletion.service';
 import { DeletionSummary } from './dto/enhanced-delete.dto';
 import * as path from 'path';
+import { convertToAccessibleUrl } from './utils/media-path.util';
+import {
+  getProcessedMediaDir,
+  UPLOAD_ROOT,
+} from 'src/common/utils/storage-path.util';
 
 const DEFAULT_CLEANUP_DELAY_DAYS = 14;
 const USER_CLEANUP_DELAY_DAYS = 7;
@@ -204,6 +210,7 @@ export class MediaService {
     user_id: number;
     category_id?: string;
     tag_ids?: string[];
+    source?: MediaSource;
     source_metadata?: Prisma.JsonValue;
   }) {
     try {
@@ -218,6 +225,7 @@ export class MediaService {
           height: data.height,
           media_type: data.media_type,
           status: MediaStatus.PENDING,
+          source: data.source ?? MediaSource.USER_UPLOAD,
           source_metadata: data.source_metadata ?? Prisma.JsonNull,
 
           user: {
@@ -275,9 +283,7 @@ export class MediaService {
         try {
           // 🚀 优化用户体验：立即生成快速封面缩略图
           const thumbnailDir = path.join(
-            process.cwd(),
-            'processed',
-            media.id,
+            getProcessedMediaDir(media.id),
             'thumbnails',
           );
           const quickCoverPath = path.join(thumbnailDir, 'quick-cover.jpg');
@@ -285,11 +291,11 @@ export class MediaService {
           // 将URL转换为本地文件路径
           let inputPath = data.url;
           if (inputPath.includes('/api/upload/file/')) {
-            inputPath = inputPath.replace(
+            const relativePath = inputPath.replace(
               /^.*\/api\/upload\/file\//,
-              'uploads/',
+              '',
             );
-            inputPath = path.join(process.cwd(), inputPath);
+            inputPath = path.join(UPLOAD_ROOT, relativePath);
           }
 
           this.logger.debug(`快速封面生成: ${inputPath} -> ${quickCoverPath}`);
@@ -323,7 +329,7 @@ export class MediaService {
           await this.videoProcessingService.submitProcessingJob({
             mediaId: media.id,
             inputPath: inputPath,
-            outputDir: path.join(process.cwd(), 'processed', media.id),
+            outputDir: getProcessedMediaDir(media.id),
             userId: data.user_id,
             options: {
               generateThumbnails: true,
@@ -497,6 +503,7 @@ export class MediaService {
             tag: true,
           },
         },
+        video_qualities: true,
         comments: {
           where: { parent_id: null },
           orderBy: { created_at: 'desc' },
@@ -528,12 +535,45 @@ export class MediaService {
       throw new NotFoundException('媒体不存在');
     }
 
-    // 更新浏览次数 - 使用原始SQL而不是increment
-    await this.databaseService.$executeRaw`
-            UPDATE "Media" SET "views" = "views" + 1 WHERE "id" = ${id}
-        `;
-
     return media;
+  }
+
+  /**
+   * 增加媒体观看次数
+   * @param mediaId 媒体ID
+   */
+  async incrementViewCount(mediaId: string) {
+    try {
+      const updated = await this.databaseService.media.update({
+        where: { id: mediaId },
+        data: {
+          views: {
+            increment: 1,
+          },
+        },
+        select: {
+          id: true,
+          views: true,
+        },
+      });
+
+      return {
+        media_id: updated.id,
+        views_total: updated.views,
+      };
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
+        throw new NotFoundException('媒体不存在');
+      }
+      this.logger.error(
+        `增加观看次数失败: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+      throw error;
+    }
   }
 
   /**
@@ -3112,8 +3152,10 @@ export class MediaService {
         this.databaseService.media.count({ where }),
       ]);
 
+      const normalized = media.map((item) => this.normalizeMediaRecord(item));
+
       return {
-        data: media,
+        data: normalized,
         total,
       };
     } catch (error) {
@@ -3407,13 +3449,45 @@ export class MediaService {
         throw new NotFoundException('媒体不存在');
       }
 
-      return media;
+      return this.normalizeMediaRecord(media);
     } catch (error) {
       this.logger.error(`获取媒体详情失败: ${error.message}`, error.stack);
       throw new UnprocessableEntityException(
         `获取媒体详情失败: ${error.message}`,
       );
     }
+  }
+
+  private normalizeMediaRecord(media: any) {
+    if (!media) {
+      return media;
+    }
+
+    const normalized = {
+      ...media,
+      url: convertToAccessibleUrl(media.url),
+      thumbnail_url: media.thumbnail_url
+        ? convertToAccessibleUrl(media.thumbnail_url)
+        : undefined,
+      original_file_url: media.source_metadata?.original_file_url
+        ? convertToAccessibleUrl(media.source_metadata.original_file_url as string)
+        : convertToAccessibleUrl(media.url),
+      video_qualities: (media.video_qualities || []).map((quality: any) => ({
+        ...quality,
+        url: convertToAccessibleUrl(quality.url),
+      })),
+    };
+
+    if (normalized.user) {
+      normalized.user = {
+        ...normalized.user,
+        avatar_url: normalized.user.avatar_url
+          ? convertToAccessibleUrl(normalized.user.avatar_url)
+          : undefined,
+      };
+    }
+
+    return normalized;
   }
 
   /**

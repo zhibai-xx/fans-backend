@@ -322,6 +322,7 @@ export class MediaInteractionService {
                     tag: true,
                   },
                 },
+                video_qualities: true,
               },
             },
           },
@@ -335,7 +336,11 @@ export class MediaInteractionService {
       ]);
 
       return {
-        data: favorites.map((favorite) => favorite.media),
+        data: favorites.map((favorite) => ({
+          id: favorite.id,
+          created_at: favorite.created_at,
+          media: favorite.media,
+        })),
         pagination: {
           page,
           limit,

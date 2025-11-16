@@ -6,6 +6,7 @@ import { DeletionResult, DeletionSummary } from '../dto/enhanced-delete.dto';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { Prisma } from '@prisma/client';
+import { getProcessedMediaDir } from 'src/common/utils/storage-path.util';
 
 @Injectable()
 export class EnhancedDeletionService {
@@ -225,9 +226,15 @@ export class EnhancedDeletionService {
         where: { media_id: mediaId },
       }),
       this.databaseService.like.deleteMany({ where: { media_id: mediaId } }),
+      this.databaseService.downloadRecord.deleteMany({
+        where: { media_id: mediaId },
+      }),
       this.databaseService.upload.updateMany({
         where: { media_id: mediaId },
         data: { media_id: null },
+      }),
+      this.databaseService.mediaRecycleLog.deleteMany({
+        where: { media_id: mediaId },
       }),
       this.databaseService.media.delete({ where: { id: mediaId } }),
     ]);
@@ -250,7 +257,7 @@ export class EnhancedDeletionService {
     mediaId: string,
   ): Promise<boolean> {
     try {
-      const processedDir = path.join(process.cwd(), 'processed', mediaId);
+      const processedDir = getProcessedMediaDir(mediaId);
 
       this.logger.debug(`🔍 检查处理目录: ${processedDir}`);
 
