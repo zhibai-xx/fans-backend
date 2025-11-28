@@ -3,6 +3,7 @@ import {
   Get,
   Delete,
   Patch,
+  Post,
   Param,
   Body,
   Query,
@@ -52,6 +53,25 @@ export class UserUploadController {
   }
 
   /**
+   * 编辑待审核媒体
+   */
+  @Patch(':id')
+  async updateDraft(
+    @Request() req,
+    @Param('id') mediaId: string,
+    @Body()
+    updateData: {
+      title?: string;
+      description?: string;
+      category_id?: string;
+      tag_ids?: string[];
+    },
+  ) {
+    const userId = req.user.id;
+    return this.mediaService.updateUserMediaDraft(userId, mediaId, updateData);
+  }
+
+  /**
    * 重新提交被拒绝的媒体
    */
   @Patch(':id/resubmit')
@@ -68,5 +88,14 @@ export class UserUploadController {
   ) {
     const userId = req.user.id;
     return this.mediaService.resubmitRejectedMedia(userId, mediaId, updateData);
+  }
+
+  /**
+   * 撤回待审核投稿
+   */
+  @Post(':id/withdraw')
+  async withdrawMedia(@Request() req, @Param('id') mediaId: string) {
+    const userId = req.user.id;
+    return this.mediaService.withdrawUserMedia(userId, mediaId);
   }
 }

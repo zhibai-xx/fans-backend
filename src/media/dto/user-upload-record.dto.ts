@@ -1,15 +1,28 @@
 import { IsOptional, IsString, IsIn, IsInt, Min, Max } from 'class-validator';
-import { Transform, Type } from 'class-transformer';
+import { Type } from 'class-transformer';
+import { MediaStatus, MediaType } from '@prisma/client';
+
+const USER_MEDIA_STATUS_VALUES = [
+  MediaStatus.PENDING_REVIEW,
+  MediaStatus.APPROVED,
+  MediaStatus.REJECTED,
+  MediaStatus.USER_DELETED,
+  MediaStatus.ADMIN_DELETED,
+  MediaStatus.SYSTEM_HIDDEN,
+] as const;
 
 export class UserUploadFiltersDto {
   @IsOptional()
   @IsString()
-  @IsIn(['PENDING', 'APPROVED', 'REJECTED', 'PRIVATE'])
+  @IsIn(USER_MEDIA_STATUS_VALUES as unknown as string[])
   status?: string;
 
   @IsOptional()
   @IsString()
-  @IsIn(['IMAGE', 'VIDEO'])
+  @IsIn([
+    MediaType.IMAGE,
+    MediaType.VIDEO,
+  ] as unknown as string[])
   media_type?: string;
 
   @IsOptional()
@@ -46,10 +59,12 @@ export class UserUploadFiltersDto {
 
 export class UserUploadStatsDto {
   total: number; // 总上传数
-  pending: number; // 待审核
+  pending_review: number; // 待审核
   approved: number; // 已通过
   rejected: number; // 已拒绝
-  private: number; // 已暂存
+  user_deleted: number; // 用户删除
+  admin_deleted: number; // 管理员删除
+  system_hidden: number; // 系统隐藏
   total_views: number; // 总浏览量
   total_likes: number; // 总点赞数
   approval_rate: number; // 通过率（百分比）

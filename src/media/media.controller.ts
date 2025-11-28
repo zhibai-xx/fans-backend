@@ -1,4 +1,4 @@
-import { MediaService } from './media.service';
+import { MediaService, MediaSourceGroup } from './media.service';
 import {
   Body,
   Controller,
@@ -94,11 +94,12 @@ export class MediaController {
     @Query('search') search?: string,
     @Query('sortBy') sortBy?: string,
     @Query('sortOrder') sortOrder?: string,
+    @Query('sourceGroup') sourceGroup?: string,
     @Query('skip', new ParseIntPipe({ optional: true })) skip?: number,
     @Query('take', new ParseIntPipe({ optional: true })) take?: number,
   ) {
     this.logger.log(
-      `获取媒体列表: userUuid=${userUuid}, type=${type}, status=${status}, categoryId=${categoryId}, tagId=${tagId}, search=${search}, sortBy=${sortBy}, sortOrder=${sortOrder}, skip=${skip}, take=${take}`,
+      `获取媒体列表: userUuid=${userUuid}, type=${type}, status=${status}, categoryId=${categoryId}, tagId=${tagId}, search=${search}, sortBy=${sortBy}, sortOrder=${sortOrder}, sourceGroup=${sourceGroup}, skip=${skip}, take=${take}`,
       MediaController.name,
     );
 
@@ -107,6 +108,13 @@ export class MediaController {
     if (userUuid) {
       userId = await this.userUuidService.getInternalIdByUuid(userUuid);
     }
+
+    const normalizedSourceGroup =
+      sourceGroup === 'community'
+        ? ('community' as MediaSourceGroup)
+        : sourceGroup === 'official'
+          ? ('official' as MediaSourceGroup)
+          : undefined;
 
     const result = await this.mediaService.findAll({
       userId,
@@ -119,6 +127,8 @@ export class MediaController {
       sortOrder: (sortOrder as 'asc' | 'desc') || 'desc',
       skip,
       take,
+      sourceGroup: normalizedSourceGroup,
+      includeHidden: false,
     });
 
     // 获取所有用户的UUID映射

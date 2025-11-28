@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { UserService } from '../auth/services/user.service';
 import { MediaService } from '../media/media.service';
+import { MediaStatus } from '@prisma/client';
 import * as os from 'os';
 import * as fs from 'fs';
 import { promisify } from 'util';
@@ -152,7 +153,9 @@ export class AdminDashboardService {
         this.databaseService.media.count({
           where: {
             updated_at: { gte: today },
-            status: { in: ['APPROVED', 'REJECTED'] },
+            status: {
+              in: [MediaStatus.APPROVED, MediaStatus.REJECTED],
+            },
           },
         }),
         this.databaseService.user.count({
@@ -165,7 +168,9 @@ export class AdminDashboardService {
     const thisWeekOperations = await this.databaseService.media.count({
       where: {
         updated_at: { gte: thisWeek },
-        status: { in: ['APPROVED', 'REJECTED'] },
+        status: {
+          in: [MediaStatus.APPROVED, MediaStatus.REJECTED],
+        },
       },
     });
 
@@ -404,7 +409,9 @@ export class AdminDashboardService {
           updated_at: {
             gte: new Date(Date.now() - 24 * 60 * 60 * 1000),
           },
-          status: { in: ['APPROVED', 'REJECTED'] },
+          status: {
+            in: [MediaStatus.APPROVED, MediaStatus.REJECTED],
+          },
         },
         include: {
           user: { select: { username: true } },
@@ -417,10 +424,13 @@ export class AdminDashboardService {
         activities.push({
           id: media.id,
           type: 'media_review',
-          title: `媒体内容${media.status === 'APPROVED' ? '通过' : '拒绝'}审核`,
+          title: `媒体内容${
+            media.status === MediaStatus.APPROVED ? '通过' : '拒绝'
+          }审核`,
           description: `${media.user?.username || '未知用户'} 的${media.media_type.toLowerCase()}内容`,
           timestamp: media.updated_at.toISOString(),
-          status: media.status === 'APPROVED' ? 'success' : 'warning',
+          status:
+            media.status === MediaStatus.APPROVED ? 'success' : 'warning',
         });
       });
 

@@ -73,7 +73,7 @@ model Media {
   duration    Int?                           // 视频时长（秒）
   width       Int?                           // 原始视频宽度（像素）
   height      Int?                           // 原始视频高度（像素）
-  status      MediaStatus @default(PENDING)  // 审核状态
+  status      MediaStatus @default(PENDING_REVIEW)  // 审核状态
   visibility  MediaVisibility @default(VISIBLE) // 可见状态
   review_comment String?  @db.VarChar(500)   // 审核备注（拒绝原因、审核建议等）
   reviewed_by Int?                           // 审核员ID
@@ -102,8 +102,11 @@ model Media {
   upload      Upload?   // 上传记录（一对一）
   deleted_at  DateTime?                     // 软删时间
   deleted_reason String? @db.VarChar(500)   // 删除原因
-  deleted_by  Int?                         // 删除操作者
+  deleted_by_id  Int?                      // 删除操作者ID
+  deleted_by_type MediaDeletionActor?      // 删除归因（USER/ADMIN）
   cleanup_scheduled_at DateTime?           // 计划清理时间
+  rejected_cleanup_scheduled_at DateTime?  // 被拒绝稿件文件计划清理时间
+  rejected_cleanup_completed_at DateTime?  // 被拒绝稿件文件完成清理时间
   recycle_logs MediaRecycleLog[]
   downloads DownloadRecord[]
 
@@ -111,7 +114,8 @@ model Media {
   @@index([source, original_created_at]) // 加速按来源和原始时间查询
   @@index([reviewed_by, reviewed_at]) // 加速审核员查询
   @@index([deleted_at, cleanup_scheduled_at])
-  @@index([deleted_by])
+  @@index([deleted_by_id])
+  @@index([rejected_cleanup_scheduled_at, status])
 }
 
 enum MediaType {
@@ -120,9 +124,12 @@ enum MediaType {
 }
 
 enum MediaStatus {
-  PENDING   // 待审核
-  APPROVED  // 已发布
-  REJECTED  // 已拒绝
+  PENDING_REVIEW   // 待审核
+  APPROVED         // 已发布
+  REJECTED         // 已拒绝
+  USER_DELETED     // 作者删除，前台不可见
+  ADMIN_DELETED    // 管理员删除
+  SYSTEM_HIDDEN    // 系统策略隐藏
 }
 
 enum MediaVisibility {
@@ -144,6 +151,11 @@ enum MediaRecycleAction {
   CLEANUP_SCHEDULED
   CLEANUP_SUCCESS
   CLEANUP_FAIL
+}
+
+enum MediaDeletionActor {
+  USER
+  ADMIN
 }
 
 model MediaRecycleLog {

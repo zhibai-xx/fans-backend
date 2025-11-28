@@ -1,3 +1,9 @@
+# 2025-11-11
+- `/media` 列表新增 `sourceGroup` 查询参数，支持按 MediaSource 聚合筛选官方精选（系统/管理员/外部）与社区投稿（用户上传）
+- 扩展 `MediaStatus` 枚举（PENDING_REVIEW/APPROVED/REJECTED/USER_DELETED/ADMIN_DELETED/SYSTEM_HIDDEN）并新增 `deleted_by_type/deleted_by_id` 字段，软删记录会记录来源且默认进入延迟清理
+- `/user-uploads` 增强：支持待审核内容的编辑/撤回、被拒绝内容重新提交、以及对待审核/被拒绝/已发布媒体的用户发起删除（标记为 USER_DELETED，前台自动隐藏并记录原因）
+- 待审核稿件的撤回改为物理删除（仅保留后台日志），避免误入“已删除”列表；管理员恢复作者删除的作品会同步恢复到删除前的原始状态并移除快照标记
+
 # 2025-11-10
 - 调整媒体来源枚举：保留 USER_UPLOAD，并新增 SYSTEM_INGEST/ADMIN_UPLOAD/EXTERNAL_FEED 以覆盖系统导入与外部渠道
 - 上传服务与控制器全面改造为系统导入语义，API 路径切换至 `/upload/system-ingest/*`，日志与提示去除微博字样

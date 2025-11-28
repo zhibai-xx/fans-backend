@@ -12,6 +12,8 @@ import { ModuleRef } from '@nestjs/core';
 import {
   MediaType,
   MediaStatus,
+  MediaVisibility,
+  MediaDeletionActor,
   Prisma,
   MediaRecycleAction,
   MediaSource,
@@ -44,10 +46,19 @@ import {
   UPLOAD_ROOT,
 } from 'src/common/utils/storage-path.util';
 
+const OFFICIAL_MEDIA_SOURCES: MediaSource[] = [
+  MediaSource.SYSTEM_INGEST,
+  MediaSource.ADMIN_UPLOAD,
+  MediaSource.EXTERNAL_FEED,
+];
+
 const DEFAULT_CLEANUP_DELAY_DAYS = 14;
 const USER_CLEANUP_DELAY_DAYS = 7;
+const REJECTED_CLEANUP_DELAY_DAYS = 30;
 const MIN_CLEANUP_DELAY_DAYS = 7;
 const MAX_CLEANUP_DELAY_DAYS = 30;
+
+export type MediaSourceGroup = 'official' | 'community';
 
 @Injectable()
 export class MediaService {
@@ -141,6 +152,276 @@ export class MediaService {
     };
   }
 
+  private calculateRejectedCleanupDate(): Date {
+    const scheduledAt = new Date();
+    scheduledAt.setDate(scheduledAt.getDate() + REJECTED_CLEANUP_DELAY_DAYS);
+    return scheduledAt;
+  }
+
+  private isJsonObject(
+    value: Prisma.JsonValue | null | undefined,
+  ): value is Prisma.JsonObject {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  private getStringArrayFromJson(value: Prisma.JsonValue | undefined): string[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.filter((item): item is string => typeof item === 'string');
+  }
+
+  private async deletePhysicalFiles(
+    media: Prisma.MediaGetPayload<{ include: { video_qualities: true } }>,
+  ): Promise<void> {
+    const storage = this.storageFactory.getStorage();
+
+    const deleteSafely = async (url?: string | null) => {
+      if (!url) return;
+      try {
+        await storage.deleteFile(url);
+      } catch (error) {
+        this.logger.warn(`删除文件失败 (${url}): ${(error as Error).message}`);
+      }
+    };
+
+    await deleteSafely(media.url);
+    await deleteSafely(media.thumbnail_url);
+
+    if (Array.isArray(media.video_qualities)) {
+      for (const quality of media.video_qualities) {
+        await deleteSafely(quality.url);
+      }
+    }
+
+    const metadataRaw = media.source_metadata as Prisma.JsonValue | null;
+    const metadata = this.isJsonObject(metadataRaw) ? metadataRaw : null;
+
+    const originalUrl =
+      metadata && typeof metadata.original_file_url === 'string'
+        ? (metadata.original_file_url as string)
+        : null;
+    if (
+      originalUrl &&
+      originalUrl !== media.url &&
+      originalUrl !== media.thumbnail_url
+    ) {
+      await deleteSafely(originalUrl);
+    }
+
+    const cleanupManifestRaw =
+      metadata && this.isJsonObject(metadata.cleanup_manifest)
+        ? (metadata.cleanup_manifest as Prisma.JsonObject)
+        : null;
+    if (cleanupManifestRaw) {
+      const manifestFiles = this.getStringArrayFromJson(
+        cleanupManifestRaw.files,
+      );
+      const manifestThumbs = this.getStringArrayFromJson(
+        cleanupManifestRaw.thumbnails,
+      );
+      const manifestQualities = this.getStringArrayFromJson(
+        cleanupManifestRaw.qualities,
+      );
+
+      for (const url of [
+        ...manifestFiles,
+        ...manifestThumbs,
+        ...manifestQualities,
+      ]) {
+        await deleteSafely(url);
+      }
+    }
+
+    if (media.media_type === MediaType.VIDEO) {
+      try {
+        await this.videoProcessingService.cleanupProcessingFiles(media.id);
+      } catch (error) {
+        this.logger.warn(
+          `清理处理文件失败 (${media.id}): ${(error as Error).message}`,
+        );
+      }
+    }
+  }
+
+  private async hardDeleteMediaRecord(
+    media: Prisma.MediaGetPayload<{ include: { video_qualities: true } }>,
+    reason?: string,
+  ) {
+    await this.deletePhysicalFiles(media);
+
+    await this.databaseService.$transaction(async (prisma) => {
+      await prisma.videoQuality.deleteMany({ where: { media_id: media.id } });
+      await prisma.mediaTag.deleteMany({ where: { media_id: media.id } });
+      await prisma.comment.deleteMany({ where: { media_id: media.id } });
+      await prisma.favorite.deleteMany({ where: { media_id: media.id } });
+      await prisma.like.deleteMany({ where: { media_id: media.id } });
+      await prisma.downloadRecord.deleteMany({ where: { media_id: media.id } });
+      await prisma.upload.updateMany({
+        where: { media_id: media.id },
+        data: { media_id: null },
+      });
+      await prisma.media.delete({ where: { id: media.id } });
+    });
+
+    await this.logRecycleAction(
+      media.id,
+      MediaRecycleAction.HARD_DELETE,
+      media.user_id,
+      reason,
+    );
+  }
+
+  private buildStatusUpdatePayload(
+    previousStatus: MediaStatus,
+    newStatus: MediaStatus,
+    reviewComment?: string,
+    adminId?: number,
+  ): Prisma.MediaUpdateInput {
+    const data: Prisma.MediaUpdateInput = {
+      status: newStatus,
+      review_comment: reviewComment ?? null,
+      reviewed_at: new Date(),
+      updated_at: new Date(),
+    };
+
+    if (typeof adminId === 'number') {
+      data.reviewer = {
+        connect: { id: adminId },
+      };
+    }
+
+    if (newStatus === MediaStatus.REJECTED) {
+      data.rejected_cleanup_scheduled_at = this.calculateRejectedCleanupDate();
+      data.rejected_cleanup_completed_at = null;
+    } else if (previousStatus === MediaStatus.REJECTED) {
+      data.rejected_cleanup_scheduled_at = null;
+      data.rejected_cleanup_completed_at = null;
+    }
+
+    return data;
+  }
+
+  private async markMediaAsUserDeleted(
+    media: Prisma.MediaGetPayload<{ include: { video_qualities: true } }>,
+    userId: number,
+    reason: string,
+    overrideStatus?: MediaStatus,
+  ) {
+    const previousStatus = media.status;
+    const cleanupScheduledAt = this.calculateCleanupSchedule(
+      USER_CLEANUP_DELAY_DAYS,
+    );
+    const manifest = this.buildCleanupManifest(media);
+    const mergedMetadata = this.mergeCleanupMetadata(
+      media.source_metadata,
+      manifest,
+    );
+    const metadataWithSnapshot = {
+      ...(mergedMetadata as Prisma.JsonObject),
+      user_deleted_snapshot: {
+        previous_status: previousStatus,
+        deleted_by: userId,
+        deleted_at: new Date().toISOString(),
+      },
+    };
+
+    await this.databaseService.media.update({
+      where: { id: media.id },
+      data: {
+        status: overrideStatus ?? MediaStatus.USER_DELETED,
+        visibility: MediaVisibility.HIDDEN,
+        deleted_at: new Date(),
+        deleted_reason: reason?.slice(0, 500) ?? null,
+        deleted_by_id: userId,
+        deleted_by_type: MediaDeletionActor.USER,
+        cleanup_scheduled_at: cleanupScheduledAt,
+        rejected_cleanup_scheduled_at: null,
+        rejected_cleanup_completed_at: null,
+        source_metadata: metadataWithSnapshot as Prisma.InputJsonValue,
+      },
+    });
+
+    await this.logRecycleAction(
+      media.id,
+      MediaRecycleAction.SOFT_DELETE,
+      userId,
+      reason,
+      {
+        actor: 'USER',
+        cleanupScheduledAt: cleanupScheduledAt.toISOString(),
+      } as Prisma.JsonObject,
+    );
+
+    return cleanupScheduledAt;
+  }
+
+  private async updateUserEditableFields(
+    mediaId: string,
+    updateData: {
+      title?: string;
+      description?: string;
+      category_id?: string;
+      tag_ids?: string[];
+    },
+    options?: { resetReview?: boolean },
+  ) {
+    const updateFields: Prisma.MediaUpdateInput = {
+      updated_at: new Date(),
+    };
+
+    if (options?.resetReview) {
+      updateFields.status = MediaStatus.PENDING_REVIEW;
+      updateFields.review_comment = null;
+      updateFields.reviewed_at = null;
+      updateFields.reviewer = {
+        disconnect: true,
+      };
+      updateFields.rejected_cleanup_scheduled_at = null;
+      updateFields.rejected_cleanup_completed_at = null;
+    }
+
+    if (updateData.title !== undefined) {
+      updateFields.title = updateData.title;
+    }
+
+    if (updateData.description !== undefined) {
+      updateFields.description = updateData.description;
+    }
+
+    if (updateData.category_id !== undefined) {
+      updateFields.category = updateData.category_id
+        ? {
+            connect: { id: updateData.category_id },
+          }
+        : {
+            disconnect: true,
+          };
+    }
+
+    const updated = await this.databaseService.media.update({
+      where: { id: mediaId },
+      data: updateFields,
+    });
+
+    if (updateData.tag_ids !== undefined) {
+      await this.databaseService.mediaTag.deleteMany({
+        where: { media_id: mediaId },
+      });
+
+      if (updateData.tag_ids.length > 0) {
+        await this.databaseService.mediaTag.createMany({
+          data: updateData.tag_ids.map((tagId) => ({
+            media_id: mediaId,
+            tag_id: tagId,
+          })),
+        });
+      }
+    }
+
+    return updated;
+  }
+
   private async logRecycleAction(
     mediaId: string,
     action: MediaRecycleAction,
@@ -224,7 +505,7 @@ export class MediaService {
           width: data.width,
           height: data.height,
           media_type: data.media_type,
-          status: MediaStatus.PENDING,
+          status: MediaStatus.PENDING_REVIEW,
           source: data.source ?? MediaSource.USER_UPLOAD,
           source_metadata: data.source_metadata ?? Prisma.JsonNull,
 
@@ -382,6 +663,8 @@ export class MediaService {
     sortOrder?: 'asc' | 'desc';
     skip?: number;
     take?: number;
+    sourceGroup?: MediaSourceGroup;
+    includeHidden?: boolean;
   }) {
     const {
       userId,
@@ -394,6 +677,8 @@ export class MediaService {
       sortOrder = 'desc',
       skip = 0,
       take = 10,
+      sourceGroup,
+      includeHidden = false,
     } = options;
 
     // 验证排序字段
@@ -442,6 +727,18 @@ export class MediaService {
         { title: { contains: search, mode: 'insensitive' } },
         { description: { contains: search, mode: 'insensitive' } },
       ];
+    }
+
+    if (sourceGroup === 'community') {
+      where.source = MediaSource.USER_UPLOAD;
+    } else if (sourceGroup === 'official') {
+      where.source = {
+        in: OFFICIAL_MEDIA_SOURCES,
+      };
+    }
+
+    if (!includeHidden) {
+      where.visibility = MediaVisibility.VISIBLE;
     }
 
     // 查询媒体列表
@@ -698,7 +995,8 @@ export class MediaService {
       data: {
         deleted_at: new Date(),
         deleted_reason: reason?.slice(0, 500) ?? null,
-        deleted_by: operatorId,
+        deleted_by_id: operatorId,
+        deleted_by_type: MediaDeletionActor.ADMIN,
         cleanup_scheduled_at: cleanupScheduledAt,
         source_metadata: mergedMetadata,
       },
@@ -759,6 +1057,15 @@ export class MediaService {
       forceDelete?: boolean;
     } = {},
   ): Promise<DeletionSummary> {
+    try {
+      await this.cleanupExpiredRejectedMedia(options.limit ?? 50);
+    } catch (error) {
+      this.logger.error(
+        `清理被拒绝媒体文件失败: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+    }
+
     const reason = options.reason ?? 'Scheduled hard deletion';
 
     const summary =
@@ -789,28 +1096,97 @@ export class MediaService {
     return summary;
   }
 
+  async cleanupExpiredRejectedMedia(limit: number = 50) {
+    const now = new Date();
+    const candidates = await this.databaseService.media.findMany({
+      where: {
+        status: MediaStatus.REJECTED,
+        rejected_cleanup_scheduled_at: {
+          not: null,
+          lte: now,
+        },
+        rejected_cleanup_completed_at: null,
+      },
+      take: limit,
+      include: {
+        video_qualities: true,
+      },
+    });
+
+    if (candidates.length === 0) {
+      return { processed: 0 };
+    }
+
+    for (const media of candidates) {
+      try {
+        await this.deletePhysicalFiles(media);
+
+        const metadataRaw = media.source_metadata as Prisma.JsonValue | null;
+        const metadata = this.isJsonObject(metadataRaw)
+          ? { ...metadataRaw }
+          : ({} as Prisma.JsonObject);
+
+        metadata.rejected_cleanup = {
+          cleaned_at: now.toISOString(),
+          retention_days: REJECTED_CLEANUP_DELAY_DAYS,
+        };
+
+        await this.databaseService.$transaction(async (prisma) => {
+          await prisma.videoQuality.deleteMany({
+            where: { media_id: media.id },
+          });
+          await prisma.media.update({
+            where: { id: media.id },
+            data: {
+              rejected_cleanup_completed_at: now,
+              rejected_cleanup_scheduled_at: null,
+              visibility: MediaVisibility.HIDDEN,
+              status: MediaStatus.SYSTEM_HIDDEN,
+              source_metadata: metadata as Prisma.InputJsonValue,
+              updated_at: new Date(),
+            },
+          });
+        });
+
+        await this.logRecycleAction(
+          media.id,
+          MediaRecycleAction.CLEANUP_SCHEDULED,
+          undefined,
+          '系统清理被拒绝的媒体文件',
+          {
+            retentionDays: REJECTED_CLEANUP_DELAY_DAYS,
+          } as Prisma.JsonObject,
+        );
+      } catch (error) {
+        this.logger.error(
+          `清理被拒绝媒体文件失败: ${media.id} - ${(error as Error).message}`,
+        );
+      }
+    }
+
+    return { processed: candidates.length };
+  }
+
   async restoreMedia(mediaIds: string[], operatorId: number) {
     const results: Array<{ id: string; success: boolean; message?: string }> =
       [];
 
     for (const mediaId of mediaIds) {
       try {
-        const updated = await this.databaseService.media.updateMany({
+        const mediaRecord = await this.databaseService.media.findFirst({
           where: {
             id: mediaId,
             deleted_at: {
               not: null,
             },
           },
-          data: {
-            deleted_at: null,
-            deleted_reason: null,
-            deleted_by: null,
-            cleanup_scheduled_at: null,
+          select: {
+            source_metadata: true,
+            status: true,
           },
         });
 
-        if (updated.count === 0) {
+        if (!mediaRecord) {
           results.push({
             id: mediaId,
             success: false,
@@ -818,6 +1194,43 @@ export class MediaService {
           });
           continue;
         }
+
+        const metadataRaw = mediaRecord
+          .source_metadata as Prisma.JsonObject | null;
+        let restoredStatus: MediaStatus = MediaStatus.APPROVED;
+        let cleanedMetadata: Prisma.InputJsonValue | null = null;
+
+        if (metadataRaw) {
+          const metadataClone = { ...metadataRaw };
+          const snapshot = metadataClone
+            .user_deleted_snapshot as Prisma.JsonObject | undefined;
+          const previousStatusRaw =
+            snapshot && (snapshot.previous_status as string | undefined);
+          if (
+            previousStatusRaw &&
+            (Object.values(MediaStatus) as string[]).includes(previousStatusRaw)
+          ) {
+            restoredStatus = previousStatusRaw as MediaStatus;
+          }
+          if (metadataClone.user_deleted_snapshot) {
+            delete metadataClone.user_deleted_snapshot;
+          }
+          cleanedMetadata = metadataClone as Prisma.InputJsonValue;
+        }
+
+        await this.databaseService.media.update({
+          where: { id: mediaId },
+          data: {
+            deleted_at: null,
+            deleted_reason: null,
+            deleted_by_id: null,
+            deleted_by_type: null,
+            cleanup_scheduled_at: null,
+            status: restoredStatus,
+            visibility: MediaVisibility.VISIBLE,
+            source_metadata: cleanedMetadata ?? Prisma.JsonNull,
+          },
+        });
 
         await this.logRecycleAction(
           mediaId,
@@ -1382,7 +1795,7 @@ export class MediaService {
       // 今日待审核数量
       this.databaseService.media.count({
         where: {
-          status: MediaStatus.PENDING,
+          status: MediaStatus.PENDING_REVIEW,
           created_at: {
             gte: today,
           },
@@ -1419,7 +1832,7 @@ export class MediaService {
     // 按状态统计
     statusCounts.forEach((item) => {
       switch (item.status) {
-        case MediaStatus.PENDING:
+        case MediaStatus.PENDING_REVIEW:
           stats.pending = item._count;
           break;
         case MediaStatus.APPROVED:
@@ -1996,30 +2409,49 @@ export class MediaService {
         },
       });
 
+      const activeStatuses = [
+        MediaStatus.PENDING_REVIEW,
+        MediaStatus.APPROVED,
+        MediaStatus.REJECTED,
+      ];
       const total = await this.databaseService.media.count({
-        where: { user_id: userId },
+        where: {
+          user_id: userId,
+          status: { in: activeStatuses },
+        },
       });
 
-      const result = {
+      const result: Record<string, number> & {
+        total: number;
+        total_views: number;
+        total_likes: number;
+        approval_rate: number;
+      } = {
         total,
-        pending: 0,
+        pending_review: 0,
         approved: 0,
         rejected: 0,
-        private: 0,
+        user_deleted: 0,
+        admin_deleted: 0,
+        system_hidden: 0,
         total_views: 0,
         total_likes: 0,
         approval_rate: 0,
       };
 
       stats.forEach((stat) => {
-        result[stat.status.toLowerCase()] = stat._count.status;
+        const key = stat.status.toLowerCase();
+        if (key in result) {
+          result[key] = stat._count.status;
+        }
         result.total_views += stat._sum.views || 0;
         result.total_likes += stat._sum.likes_count || 0;
       });
 
-      // 计算通过率
       if (total > 0) {
-        result.approval_rate = Math.round((result.approved / total) * 100);
+        result.approval_rate = Math.round(
+          (result.approved / total) * 100,
+        );
       }
 
       return result;
@@ -2137,6 +2569,14 @@ export class MediaService {
 
       if (status) {
         where.status = status as MediaStatus;
+      } else {
+        where.status = {
+          notIn: [
+            MediaStatus.USER_DELETED,
+            MediaStatus.ADMIN_DELETED,
+            MediaStatus.SYSTEM_HIDDEN,
+          ],
+        };
       }
 
       if (media_type) {
@@ -2272,13 +2712,15 @@ export class MediaService {
    * @param userId 用户ID
    * @param mediaId 媒体ID
    */
-  async deleteUserMedia(userId: number, mediaId: string) {
+  async deleteUserMedia(userId: number, mediaId: string, reason?: string) {
     try {
-      // 检查媒体是否存在且属于该用户
       const media = await this.databaseService.media.findFirst({
         where: {
           id: mediaId,
           user_id: userId,
+        },
+        include: {
+          video_qualities: true,
         },
       });
 
@@ -2286,38 +2728,48 @@ export class MediaService {
         throw new NotFoundException('媒体不存在或无权删除');
       }
 
-      // 检查媒体状态（已通过的内容可能需要管理员权限删除）
-      if (media.status === 'APPROVED') {
-        throw new ForbiddenException('已通过审核的内容不能删除，请联系管理员');
+      if (
+        media.status === MediaStatus.ADMIN_DELETED ||
+        media.status === MediaStatus.SYSTEM_HIDDEN
+      ) {
+        throw new ForbiddenException('该内容当前无法删除');
       }
 
-      // 在事务中删除媒体及相关数据
-      await this.databaseService.$transaction(async (prisma) => {
-        // 删除标签关联
-        await prisma.mediaTag.deleteMany({
-          where: { media_id: mediaId },
-        });
+      if (media.status === MediaStatus.USER_DELETED) {
+        return { success: true };
+      }
 
-        // 删除评论
-        await prisma.comment.deleteMany({
-          where: { media_id: mediaId },
-        });
+      if (
+        media.status === MediaStatus.PENDING_REVIEW ||
+        media.status === MediaStatus.REJECTED
+      ) {
+        await this.hardDeleteMediaRecord(
+          media,
+          media.status === MediaStatus.PENDING_REVIEW
+            ? '用户删除待审核投稿'
+            : '用户删除被拒绝投稿',
+        );
+        return { success: true };
+      }
 
-        // 删除收藏
-        await prisma.favorite.deleteMany({
-          where: { media_id: mediaId },
-        });
+      if (media.status !== MediaStatus.APPROVED) {
+        throw new ForbiddenException('当前状态下无法删除该内容');
+      }
 
-        // 删除媒体记录
-        await prisma.media.delete({
-          where: { id: mediaId },
-        });
-      });
+      const deletionReason =
+        reason ??
+        (media.status === MediaStatus.APPROVED
+          ? '用户删除已发布的媒体'
+          : '用户删除未通过或待审核的投稿');
+
+      await this.markMediaAsUserDeleted(media, userId, deletionReason);
 
       this.logger.log(
         `用户 ${userId} 删除了媒体 ${mediaId}`,
         MediaService.name,
       );
+
+      return { success: true };
     } catch (error) {
       this.logger.error(`删除用户媒体失败: ${error.message}`, error.stack);
 
@@ -2329,6 +2781,105 @@ export class MediaService {
       }
 
       throw new UnprocessableEntityException(`删除媒体失败: ${error.message}`);
+    }
+  }
+
+  async withdrawUserMedia(userId: number, mediaId: string) {
+    try {
+      const media = await this.databaseService.media.findFirst({
+        where: {
+          id: mediaId,
+          user_id: userId,
+        },
+        include: {
+          video_qualities: true,
+        },
+      });
+
+      if (!media) {
+        throw new NotFoundException('媒体不存在或无权操作');
+      }
+
+      if (media.status === MediaStatus.PENDING_REVIEW) {
+        await this.hardDeleteMediaRecord(media, '用户撤回投稿');
+
+        this.logger.log(
+          `用户 ${userId} 撤回了待审核媒体 ${mediaId}（已物理删除）`,
+          MediaService.name,
+        );
+
+        return { success: true, deleted: true };
+      }
+
+      if (
+        media.status === MediaStatus.ADMIN_DELETED ||
+        media.status === MediaStatus.SYSTEM_HIDDEN
+      ) {
+        throw new ForbiddenException('该内容当前无法撤回');
+      }
+
+      await this.markMediaAsUserDeleted(
+        media,
+        userId,
+        '用户撤回投稿',
+        MediaStatus.USER_DELETED,
+      );
+
+      return { success: true };
+    } catch (error) {
+      this.logger.error(`撤回媒体失败: ${error.message}`, error.stack);
+
+      if (
+        error instanceof NotFoundException ||
+        error instanceof ForbiddenException
+      ) {
+        throw error;
+      }
+
+      throw new UnprocessableEntityException(`撤回媒体失败: ${error.message}`);
+    }
+  }
+
+  async updateUserMediaDraft(
+    userId: number,
+    mediaId: string,
+    updateData: {
+      title?: string;
+      description?: string;
+      category_id?: string;
+      tag_ids?: string[];
+    },
+  ) {
+    try {
+      const media = await this.databaseService.media.findFirst({
+        where: {
+          id: mediaId,
+          user_id: userId,
+        },
+      });
+
+      if (!media) {
+        throw new NotFoundException('媒体不存在或无权编辑');
+      }
+
+      if (media.status !== MediaStatus.PENDING_REVIEW) {
+        throw new ForbiddenException('仅待审核的内容可以编辑');
+      }
+
+      return await this.updateUserEditableFields(mediaId, updateData, {
+        resetReview: false,
+      });
+    } catch (error) {
+      this.logger.error(`更新用户媒体失败: ${error.message}`, error.stack);
+
+      if (
+        error instanceof NotFoundException ||
+        error instanceof ForbiddenException
+      ) {
+        throw error;
+      }
+
+      throw new UnprocessableEntityException(`更新失败: ${error.message}`);
     }
   }
 
@@ -2362,75 +2913,14 @@ export class MediaService {
       }
 
       // 只允许重新提交被拒绝的内容
-      if (media.status !== 'REJECTED') {
+      if (media.status !== MediaStatus.REJECTED) {
         throw new ForbiddenException('只能重新提交被拒绝的内容');
       }
 
-      // 在事务中更新媒体信息并重置审核状态
-      const updatedMedia = await this.databaseService.$transaction(
-        async (prisma) => {
-          // 准备更新数据
-          const updateFields: any = {
-            status: 'PENDING', // 重置为待审核
-            review_comment: null as any, // 清除审核备注
-            reviewed_at: null as any, // 清除审核时间
-            updated_at: new Date(),
-          };
-
-          // 清除审核员关联 - 使用Prisma关系语法
-          updateFields.reviewer = {
-            disconnect: true,
-          };
-
-          // 添加其他字段
-          if (updateData.title !== undefined) {
-            updateFields.title = updateData.title;
-          }
-          if (updateData.description !== undefined) {
-            updateFields.description = updateData.description;
-          }
-
-          // 处理分类关联 - 使用Prisma关系语法
-          if (updateData.category_id !== undefined) {
-            if (updateData.category_id) {
-              // 连接到新分类
-              updateFields.category = {
-                connect: { id: updateData.category_id },
-              };
-            } else {
-              // 断开分类关联
-              updateFields.category = {
-                disconnect: true,
-              };
-            }
-          }
-
-          // 更新媒体信息和状态
-          const updated = await prisma.media.update({
-            where: { id: mediaId },
-            data: updateFields,
-          });
-
-          // 更新标签关联（如果提供了标签）
-          if (updateData.tag_ids !== undefined) {
-            // 删除现有标签关联
-            await prisma.mediaTag.deleteMany({
-              where: { media_id: mediaId },
-            });
-
-            // 创建新的标签关联
-            if (updateData.tag_ids.length > 0) {
-              await prisma.mediaTag.createMany({
-                data: updateData.tag_ids.map((tagId) => ({
-                  media_id: mediaId,
-                  tag_id: tagId,
-                })),
-              });
-            }
-          }
-
-          return updated;
-        },
+      const updatedMedia = await this.updateUserEditableFields(
+        mediaId,
+        updateData,
+        { resetReview: true },
       );
 
       this.logger.log(
@@ -2763,13 +3253,27 @@ export class MediaService {
         weekCount,
       ] = await Promise.all([
         this.databaseService.media.count(),
-        this.databaseService.media.count({ where: { status: 'PENDING' } }),
-        this.databaseService.media.count({ where: { status: 'APPROVED' } }),
-        this.databaseService.media.count({ where: { status: 'REJECTED' } }),
-        this.databaseService.media.count({ where: { visibility: 'VISIBLE' } }),
-        this.databaseService.media.count({ where: { visibility: 'HIDDEN' } }),
-        this.databaseService.media.count({ where: { media_type: 'IMAGE' } }),
-        this.databaseService.media.count({ where: { media_type: 'VIDEO' } }),
+        this.databaseService.media.count({
+          where: { status: MediaStatus.PENDING_REVIEW },
+        }),
+        this.databaseService.media.count({
+          where: { status: MediaStatus.APPROVED },
+        }),
+        this.databaseService.media.count({
+          where: { status: MediaStatus.REJECTED },
+        }),
+        this.databaseService.media.count({
+          where: { visibility: MediaVisibility.VISIBLE },
+        }),
+        this.databaseService.media.count({
+          where: { visibility: MediaVisibility.HIDDEN },
+        }),
+        this.databaseService.media.count({
+          where: { media_type: MediaType.IMAGE },
+        }),
+        this.databaseService.media.count({
+          where: { media_type: MediaType.VIDEO },
+        }),
         this.databaseService.media.count({
           where: {
             created_at: {
@@ -2838,14 +3342,17 @@ export class MediaService {
         throw new NotFoundException('媒体不存在');
       }
 
+      const previousStatus = media.status as MediaStatus;
+      const nextStatus = status as MediaStatus;
+      const updateData = this.buildStatusUpdatePayload(
+        previousStatus,
+        nextStatus,
+        reviewComment,
+      );
+
       const updatedMedia = await this.databaseService.media.update({
         where: { id },
-        data: {
-          status,
-          review_comment: reviewComment,
-          reviewed_at: new Date(),
-          updated_at: new Date(),
-        },
+        data: updateData,
         include: {
           user: {
             select: {
@@ -3281,16 +3788,24 @@ export class MediaService {
     adminId?: number,
   ) {
     try {
+      const medias = await this.databaseService.media.findMany({
+        where: { id: { in: mediaIds } },
+        select: { id: true, status: true },
+      });
+
+      const existingIds = new Set(medias.map((item) => item.id));
+      const missingIds = mediaIds.filter((id) => !existingIds.has(id));
+
       const results = await Promise.allSettled(
-        mediaIds.map((id) =>
+        medias.map((media) =>
           this.databaseService.media.update({
-            where: { id },
-            data: {
-              status: status as any,
-              review_comment: reviewComment,
-              reviewed_by: adminId,
-              reviewed_at: new Date(),
-            },
+            where: { id: media.id },
+            data: this.buildStatusUpdatePayload(
+              media.status as MediaStatus,
+              status as MediaStatus,
+              reviewComment,
+              adminId,
+            ),
           }),
         ),
       );
@@ -3298,7 +3813,9 @@ export class MediaService {
       const successCount = results.filter(
         (r) => r.status === 'fulfilled',
       ).length;
-      const failedCount = results.filter((r) => r.status === 'rejected').length;
+      const failedCount =
+        results.filter((r) => r.status === 'rejected').length +
+        missingIds.length;
 
       this.logger.log(
         `批量更新媒体状态完成: 成功${successCount}个, 失败${failedCount}个`,

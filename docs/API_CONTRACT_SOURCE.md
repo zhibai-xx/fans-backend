@@ -13,6 +13,17 @@
 - 在 fans-next 中对比接口差异, 校验请求路径与字段命名
 - 后端在合并前执行契约快照比对, 确认 swagger.json 无意外改动
 
+### 媒体状态与用户操作
+- `MediaStatus` 包含 `PENDING_REVIEW/APPROVED/REJECTED/USER_DELETED/ADMIN_DELETED/SYSTEM_HIDDEN`：
+  - `USER_DELETED` 由作者主动删除（记录 `deleted_by_type/deleted_by_id/deleted_reason`，前台隐藏并进入延迟清理）
+  - `ADMIN_DELETED` / `SYSTEM_HIDDEN` 由内容安全策略触发
+- 普通用户媒体管理接口 (`/user-uploads`，均需 JWT)：
+  - `GET /user-uploads` & `GET /user-uploads/stats`：分页查询自身媒体、返回状态统计及审核备注
+  - `PATCH /user-uploads/:id`：仅允许待审核稿件编辑标题/描述/分类/标签
+  - `PATCH /user-uploads/:id/resubmit`：被拒绝稿件重新提交，自动重置状态为 `PENDING_REVIEW`
+  - `POST /user-uploads/:id/withdraw`：撤回待审核投稿
+  - `DELETE /user-uploads/:id`：删除待审核/已拒绝/已发布作品（已发布会标记为 `USER_DELETED` 并进入软删流程）
+
 ## 守护措施
 - 在 tests/ 中保留契约快照测试, 确保 message 字段类型保持字符串
 - 对 multipart/form-data 与分片上传接口标注 file schema 与 50MB 限制
