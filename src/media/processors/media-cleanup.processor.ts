@@ -1,8 +1,8 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
-import { EnhancedDeletionService } from '../services/enhanced-deletion.service';
 import { DeletionSummary } from '../dto/enhanced-delete.dto';
 import { MyLoggerService } from 'src/my-logger/my-logger.service';
+import { MediaService } from '../media.service';
 
 const MEDIA_CLEANUP_QUEUE = 'media-cleanup';
 const HARD_DELETE_JOB = 'scheduled-hard-delete';
@@ -16,9 +16,7 @@ interface MediaCleanupJobData {
 export class MediaCleanupProcessor extends WorkerHost {
   private readonly logger = new MyLoggerService(MediaCleanupProcessor.name);
 
-  constructor(
-    private readonly enhancedDeletionService: EnhancedDeletionService,
-  ) {
+  constructor(private readonly mediaService: MediaService) {
     super();
   }
 
@@ -35,13 +33,13 @@ export class MediaCleanupProcessor extends WorkerHost {
       `开始执行回收站硬删除任务: ${job.id}, 批次大小: ${limit}, 原因: ${reason}`,
     );
 
-    const summary =
-      await this.enhancedDeletionService.performScheduledHardDeletion(limit, {
-        reason,
-        createBackup: false,
-        forceDelete: true,
-        operatorId: 0,
-      });
+    const summary = await this.mediaService.cleanupRecycleBin({
+      limit,
+      reason,
+      createBackup: false,
+      operatorId: 0,
+      forceDelete: true,
+    });
 
     const freedMB = summary.spaceFree / 1024 / 1024;
     this.logger.log(

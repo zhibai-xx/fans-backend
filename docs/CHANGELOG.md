@@ -1,3 +1,6 @@
+# 2025-11-12
+- 媒体回收站定时任务改为调用 `cleanupRecycleBin`：BullMQ worker 会先清理到期的拒稿文件，再执行硬删除，确保 30 天后无需人工介入也能释放存储
+
 # 2025-11-11
 - `/media` 列表新增 `sourceGroup` 查询参数，支持按 MediaSource 聚合筛选官方精选（系统/管理员/外部）与社区投稿（用户上传）
 - 扩展 `MediaStatus` 枚举（PENDING_REVIEW/APPROVED/REJECTED/USER_DELETED/ADMIN_DELETED/SYSTEM_HIDDEN）并新增 `deleted_by_type/deleted_by_id` 字段，软删记录会记录来源且默认进入延迟清理
