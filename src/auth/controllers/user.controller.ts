@@ -160,7 +160,11 @@ export class UserController {
     },
   })
   @ApiOperation({ summary: '上传并更新用户头像' })
-  @ApiResponse({ status: 200, description: '头像更新成功', type: UserResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: '头像更新成功',
+    type: UserResponseDto,
+  })
   async uploadAvatar(
     @Request() req,
     @UploadedFile() file: Express.Multer.File,

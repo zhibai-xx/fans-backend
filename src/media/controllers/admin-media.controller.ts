@@ -364,10 +364,7 @@ export class AdminMediaController {
    */
   @Post('recycle/hard-delete')
   @ApiOperation({ summary: '彻底删除回收站媒体' })
-  async hardDeleteMedia(
-    @Request() req,
-    @Body() body: EnhancedDeleteDto,
-  ) {
+  async hardDeleteMedia(@Request() req, @Body() body: EnhancedDeleteDto) {
     try {
       const adminId = req.user.id;
       const result = await this.mediaService.hardDeleteMedia(
@@ -396,10 +393,7 @@ export class AdminMediaController {
    */
   @Post('recycle/cleanup')
   @ApiOperation({ summary: '执行回收站清理任务' })
-  async cleanupRecycleBin(
-    @Request() req,
-    @Body() body: CleanupRecycleBinDto,
-  ) {
+  async cleanupRecycleBin(@Request() req, @Body() body: CleanupRecycleBinDto) {
     try {
       const adminId = req.user.id;
       const result = await this.mediaService.cleanupRecycleBin({

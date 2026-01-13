@@ -17,6 +17,9 @@ import {
   Prisma,
   MediaRecycleAction,
   MediaSource,
+  TagCreatorType,
+  TagSource,
+  TagStatus,
 } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from 'src/database/database.service';
@@ -59,6 +62,13 @@ const MIN_CLEANUP_DELAY_DAYS = 7;
 const MAX_CLEANUP_DELAY_DAYS = 30;
 
 export type MediaSourceGroup = 'official' | 'community';
+
+type CreateTagOptions = {
+  source: TagSource;
+  creatorId?: number;
+  creatorType?: TagCreatorType;
+  allowExisting?: boolean;
+};
 
 @Injectable()
 export class MediaService {
@@ -164,7 +174,9 @@ export class MediaService {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
-  private getStringArrayFromJson(value: Prisma.JsonValue | undefined): string[] {
+  private getStringArrayFromJson(
+    value: Prisma.JsonValue | undefined,
+  ): string[] {
     if (!Array.isArray(value)) {
       return [];
     }
@@ -194,12 +206,12 @@ export class MediaService {
       }
     }
 
-    const metadataRaw = media.source_metadata as Prisma.JsonValue | null;
+    const metadataRaw = media.source_metadata;
     const metadata = this.isJsonObject(metadataRaw) ? metadataRaw : null;
 
     const originalUrl =
       metadata && typeof metadata.original_file_url === 'string'
-        ? (metadata.original_file_url as string)
+        ? metadata.original_file_url
         : null;
     if (
       originalUrl &&
@@ -211,7 +223,7 @@ export class MediaService {
 
     const cleanupManifestRaw =
       metadata && this.isJsonObject(metadata.cleanup_manifest)
-        ? (metadata.cleanup_manifest as Prisma.JsonObject)
+        ? metadata.cleanup_manifest
         : null;
     if (cleanupManifestRaw) {
       const manifestFiles = this.getStringArrayFromJson(
@@ -318,7 +330,7 @@ export class MediaService {
       manifest,
     );
     const metadataWithSnapshot = {
-      ...(mergedMetadata as Prisma.JsonObject),
+      ...mergedMetadata,
       user_deleted_snapshot: {
         previous_status: previousStatus,
         deleted_by: userId,
@@ -463,7 +475,7 @@ export class MediaService {
           result.mediaId,
           result.success ? actions.success : actions.failure,
           operatorId,
-          result.success ? baseReason ?? result.message : result.message,
+          result.success ? (baseReason ?? result.message) : result.message,
           {
             filesDeleted: result.filesDeleted,
             spaceFreed: result.spaceFreed,
@@ -723,10 +735,22 @@ export class MediaService {
     }
 
     if (search) {
-      where.OR = [
-        { title: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
-      ];
+      const trimmedSearch = search.trim();
+      if (trimmedSearch) {
+        where.OR = [
+          { title: { contains: trimmedSearch, mode: 'insensitive' } },
+          { description: { contains: trimmedSearch, mode: 'insensitive' } },
+          {
+            media_tags: {
+              some: {
+                tag: {
+                  name: { contains: trimmedSearch, mode: 'insensitive' },
+                },
+              },
+            },
+          },
+        ];
+      }
     }
 
     if (sourceGroup === 'community') {
@@ -981,9 +1005,7 @@ export class MediaService {
       };
     }
 
-    const cleanupScheduledAt = this.calculateCleanupSchedule(
-      cleanupDelayDays,
-    );
+    const cleanupScheduledAt = this.calculateCleanupSchedule(cleanupDelayDays);
     const manifest = this.buildCleanupManifest(media);
     const mergedMetadata = this.mergeCleanupMetadata(
       media.source_metadata,
@@ -1121,7 +1143,7 @@ export class MediaService {
       try {
         await this.deletePhysicalFiles(media);
 
-        const metadataRaw = media.source_metadata as Prisma.JsonValue | null;
+        const metadataRaw = media.source_metadata;
         const metadata = this.isJsonObject(metadataRaw)
           ? { ...metadataRaw }
           : ({} as Prisma.JsonObject);
@@ -1195,15 +1217,16 @@ export class MediaService {
           continue;
         }
 
-        const metadataRaw = mediaRecord
-          .source_metadata as Prisma.JsonObject | null;
+        const metadataRaw =
+          mediaRecord.source_metadata as Prisma.JsonObject | null;
         let restoredStatus: MediaStatus = MediaStatus.APPROVED;
         let cleanedMetadata: Prisma.InputJsonValue | null = null;
 
         if (metadataRaw) {
           const metadataClone = { ...metadataRaw };
-          const snapshot = metadataClone
-            .user_deleted_snapshot as Prisma.JsonObject | undefined;
+          const snapshot = metadataClone.user_deleted_snapshot as
+            | Prisma.JsonObject
+            | undefined;
           const previousStatusRaw =
             snapshot && (snapshot.previous_status as string | undefined);
           if (
@@ -1268,11 +1291,7 @@ export class MediaService {
     return { items, total };
   }
 
-  async getRecycleBinItems(
-    page: number,
-    limit: number,
-    search?: string,
-  ) {
+  async getRecycleBinItems(page: number, limit: number, search?: string) {
     const skip = (page - 1) * limit;
 
     const where: Prisma.MediaWhereInput = {
@@ -1365,6 +1384,10 @@ export class MediaService {
   // 标签相关方法
   // =====================================
 
+  private normalizeTagName(name: string): string {
+    return name.trim().replace(/\s+/g, ' ').toLowerCase();
+  }
+
   /**
    * 获取所有标签
    * @returns 标签列表
@@ -1372,6 +1395,7 @@ export class MediaService {
   async getAllTags() {
     try {
       const tags = await this.databaseService.tag.findMany({
+        where: { status: TagStatus.ACTIVE },
         orderBy: { created_at: 'desc' },
         include: {
           _count: {
@@ -1385,6 +1409,9 @@ export class MediaService {
       return tags.map((tag) => ({
         id: tag.id,
         name: tag.name,
+        normalized_name: tag.normalized_name,
+        source: tag.source,
+        status: tag.status,
         created_at: tag.created_at,
         usage_count: tag._count.media_tags,
       }));
@@ -1401,21 +1428,38 @@ export class MediaService {
    * @param createTagDto 标签创建数据
    * @returns 创建的标签
    */
-  async createTag(createTagDto: CreateTagDto) {
+  async createTag(createTagDto: CreateTagDto, options?: CreateTagOptions) {
     try {
+      const displayName = createTagDto.name.trim().replace(/\s+/g, ' ');
+      const normalizedName = this.normalizeTagName(displayName);
+      if (!normalizedName) {
+        throw new BadRequestException('标签名称不能为空');
+      }
+
       // 检查标签是否已存在
       const existingTag = await this.databaseService.tag.findUnique({
-        where: { name: createTagDto.name },
+        where: { normalized_name: normalizedName },
       });
 
       if (existingTag) {
+        if (existingTag.status === TagStatus.BLOCKED) {
+          throw new BadRequestException('标签已下线');
+        }
+        if (options?.allowExisting) {
+          return existingTag;
+        }
         throw new BadRequestException('标签已存在');
       }
 
       // 创建新标签
       const tag = await this.databaseService.tag.create({
         data: {
-          name: createTagDto.name,
+          name: displayName,
+          normalized_name: normalizedName,
+          source: options?.source ?? TagSource.USER,
+          status: TagStatus.ACTIVE,
+          created_by_id: options?.creatorId,
+          created_by_type: options?.creatorType,
         },
       });
 
@@ -1497,20 +1541,13 @@ export class MediaService {
         throw new NotFoundException('标签不存在');
       }
 
-      // 删除标签及其关联关系
-      await this.databaseService.$transaction([
-        // 删除媒体标签关联
-        this.databaseService.mediaTag.deleteMany({
-          where: { tag_id: id },
-        }),
-        // 删除标签
-        this.databaseService.tag.delete({
-          where: { id },
-        }),
-      ]);
+      await this.databaseService.tag.update({
+        where: { id },
+        data: { status: TagStatus.BLOCKED },
+      });
 
-      this.logger.log(`删除标签: ${tag.name}`, MediaService.name);
-      return { success: true, message: '标签已成功删除' };
+      this.logger.log(`下线标签: ${tag.name}`, MediaService.name);
+      return { success: true, message: '标签已下线' };
     } catch (error) {
       this.logger.error(`删除标签失败: ${error.message}`, error.stack);
 
@@ -1529,18 +1566,23 @@ export class MediaService {
    */
   async searchTags(query: string) {
     try {
+      const normalizedQuery = this.normalizeTagName(query);
+      if (!normalizedQuery) {
+        return [];
+      }
+
       const tags = await this.databaseService.tag.findMany({
         where: {
-          name: {
-            contains: query,
-            mode: 'insensitive',
-          },
+          status: TagStatus.ACTIVE,
+          normalized_name: { contains: normalizedQuery },
         },
         orderBy: { created_at: 'desc' },
         take: 20, // 限制返回数量
       });
 
-      return tags;
+      return tags.map((tag) => ({
+        ...tag,
+      }));
     } catch (error) {
       this.logger.error(`搜索标签失败: ${error.message}`, error.stack);
       throw new UnprocessableEntityException(`搜索标签失败: ${error.message}`);
@@ -2449,9 +2491,7 @@ export class MediaService {
       });
 
       if (total > 0) {
-        result.approval_rate = Math.round(
-          (result.approved / total) * 100,
-        );
+        result.approval_rate = Math.round((result.approved / total) * 100);
       }
 
       return result;
@@ -2953,13 +2993,9 @@ export class MediaService {
    */
   async getAllTagsWithStats(search?: string) {
     try {
-      const where = search
-        ? {
-            name: {
-              contains: search,
-              mode: 'insensitive' as const,
-            },
-          }
+      const normalizedSearch = search ? this.normalizeTagName(search) : '';
+      const where = normalizedSearch
+        ? { normalized_name: { contains: normalizedSearch } }
         : {};
 
       const tags = await this.databaseService.tag.findMany({
@@ -3038,6 +3074,12 @@ export class MediaService {
    */
   async updateTag(id: string, updateTagDto: { name: string }) {
     try {
+      const displayName = updateTagDto.name.trim().replace(/\s+/g, ' ');
+      const normalizedName = this.normalizeTagName(displayName);
+      if (!normalizedName) {
+        throw new BadRequestException('标签名称不能为空');
+      }
+
       // 检查标签是否存在
       const existingTag = await this.databaseService.tag.findUnique({
         where: { id },
@@ -3048,9 +3090,9 @@ export class MediaService {
       }
 
       // 检查名称是否与其他标签冲突
-      if (updateTagDto.name !== existingTag.name) {
+      if (normalizedName !== existingTag.normalized_name) {
         const duplicateTag = await this.databaseService.tag.findUnique({
-          where: { name: updateTagDto.name },
+          where: { normalized_name: normalizedName },
         });
 
         if (duplicateTag) {
@@ -3061,13 +3103,13 @@ export class MediaService {
       // 更新标签
       const updatedTag = await this.databaseService.tag.update({
         where: { id },
-        data: { name: updateTagDto.name },
+        data: {
+          name: displayName,
+          normalized_name: normalizedName,
+        },
       });
 
-      this.logger.log(
-        `更新标签: ${id} -> ${updateTagDto.name}`,
-        MediaService.name,
-      );
+      this.logger.log(`更新标签: ${id} -> ${displayName}`, MediaService.name);
       return updatedTag;
     } catch (error) {
       this.logger.error(`更新标签失败: ${error.message}`, error.stack);
@@ -3082,26 +3124,54 @@ export class MediaService {
   }
 
   /**
+   * 更新标签状态（管理员专用）
+   * @param id 标签ID
+   * @param status 标签状态
+   * @returns 更新后的标签
+   */
+  async updateTagStatus(id: string, status: TagStatus) {
+    try {
+      const existingTag = await this.databaseService.tag.findUnique({
+        where: { id },
+      });
+
+      if (!existingTag) {
+        throw new NotFoundException('标签不存在');
+      }
+
+      const updatedTag = await this.databaseService.tag.update({
+        where: { id },
+        data: { status },
+      });
+
+      this.logger.log(
+        `更新标签状态: ${id} -> ${status}`,
+        MediaService.name,
+      );
+      return updatedTag;
+    } catch (error) {
+      this.logger.error(`更新标签状态失败: ${error.message}`, error.stack);
+      if (
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
+      ) {
+        throw error;
+      }
+      throw new UnprocessableEntityException(
+        `更新标签状态失败: ${error.message}`,
+      );
+    }
+  }
+
+  /**
    * 批量删除标签（管理员专用）
    * @param ids 标签ID数组
    */
   async batchDeleteTags(ids: string[]) {
     try {
-      // 使用事务确保操作一致性
-      await this.databaseService.$transaction(async (prisma) => {
-        // 先删除关联的MediaTag记录
-        await prisma.mediaTag.deleteMany({
-          where: {
-            tag_id: { in: ids },
-          },
-        });
-
-        // 再删除标签
-        await prisma.tag.deleteMany({
-          where: {
-            id: { in: ids },
-          },
-        });
+      await this.databaseService.tag.updateMany({
+        where: { id: { in: ids } },
+        data: { status: TagStatus.BLOCKED },
       });
 
       this.logger.log(`批量删除标签: ${ids.join(', ')}`, MediaService.name);
@@ -3119,18 +3189,19 @@ export class MediaService {
    */
   async batchDeleteCategories(ids: string[]) {
     try {
-      // 使用事务确保操作一致性
-      await this.databaseService.$transaction(async (prisma) => {
-        // 先解除媒体的分类关联
-        await prisma.media.updateMany({
-          where: {
-            category_id: { in: ids },
-          },
-          data: {
-            category_id: null,
-          },
-        });
+      const mediaCount = await this.databaseService.media.count({
+        where: {
+          category_id: { in: ids },
+        },
+      });
 
+      if (mediaCount > 0) {
+        throw new BadRequestException(
+          `无法删除分类，还有 ${mediaCount} 个媒体正在使用所选分类`,
+        );
+      }
+
+      await this.databaseService.$transaction(async (prisma) => {
         // 再删除分类
         await prisma.category.deleteMany({
           where: {
@@ -3342,7 +3413,7 @@ export class MediaService {
         throw new NotFoundException('媒体不存在');
       }
 
-      const previousStatus = media.status as MediaStatus;
+      const previousStatus = media.status;
       const nextStatus = status as MediaStatus;
       const updateData = this.buildStatusUpdatePayload(
         previousStatus,
@@ -3801,7 +3872,7 @@ export class MediaService {
           this.databaseService.media.update({
             where: { id: media.id },
             data: this.buildStatusUpdatePayload(
-              media.status as MediaStatus,
+              media.status,
               status as MediaStatus,
               reviewComment,
               adminId,
@@ -3987,7 +4058,9 @@ export class MediaService {
         ? convertToAccessibleUrl(media.thumbnail_url)
         : undefined,
       original_file_url: media.source_metadata?.original_file_url
-        ? convertToAccessibleUrl(media.source_metadata.original_file_url as string)
+        ? convertToAccessibleUrl(
+            media.source_metadata.original_file_url as string,
+          )
         : convertToAccessibleUrl(media.url),
       video_qualities: (media.video_qualities || []).map((quality: any) => ({
         ...quality,

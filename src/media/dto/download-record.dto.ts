@@ -46,7 +46,9 @@ export class DownloadRecordDto {
     this.media_id = record.media_id;
     this.media_type = record.media_type;
     this.title = record.media.title;
-    this.thumbnail_url = convertToAccessibleUrl(record.media.thumbnail_url || '');
+    this.thumbnail_url = convertToAccessibleUrl(
+      record.media.thumbnail_url || '',
+    );
     this.download_path = convertToAccessibleUrl(record.media.url);
     this.file_size = record.file_size ?? record.media.size ?? undefined;
     this.file_type = record.file_type ?? undefined;

@@ -19,7 +19,12 @@ import {
   NotFoundException,
   Request,
 } from '@nestjs/common';
-import { MediaType, MediaStatus } from '@prisma/client';
+import {
+  MediaType,
+  MediaStatus,
+  TagCreatorType,
+  TagSource,
+} from '@prisma/client';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { MyLoggerService } from 'src/my-logger/my-logger.service';
 import { CreateMediaDto } from './dto/create-media.dto';
@@ -178,9 +183,17 @@ export class MediaController {
   @ApiResponse({ status: 201, description: '创建成功' })
   @ApiResponse({ status: 400, description: '标签已存在' })
   @ApiResponse({ status: 401, description: '未授权' })
-  async createTag(@Body() createTagDto: CreateTagDto) {
+  async createTag(
+    @Body() createTagDto: CreateTagDto,
+    @Req() req: RequestWithUser,
+  ) {
     this.logger.log(`创建标签: ${createTagDto.name}`, MediaController.name);
-    const tag = await this.mediaService.createTag(createTagDto);
+    const tag = await this.mediaService.createTag(createTagDto, {
+      source: TagSource.USER,
+      creatorId: req.user.id,
+      creatorType: TagCreatorType.USER,
+      allowExisting: true,
+    });
     return { tag };
   }
 

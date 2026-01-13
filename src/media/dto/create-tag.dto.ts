@@ -1,5 +1,12 @@
-import { IsString, IsNotEmpty, MaxLength, IsOptional } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  MaxLength,
+  IsOptional,
+  IsEnum,
+} from 'class-validator';
 import { ApiProperty, PartialType } from '@nestjs/swagger';
+import { TagSource, TagStatus } from '@prisma/client';
 
 export class CreateTagDto {
   /**
@@ -15,9 +22,42 @@ export class CreateTagDto {
   @IsNotEmpty()
   @MaxLength(30)
   name: string;
+
+  /**
+   * 标签来源（可选，默认由服务端注入）
+   */
+  @ApiProperty({
+    description: '标签来源（ADMIN/USER）',
+    enum: TagSource,
+    required: false,
+  })
+  @IsEnum(TagSource)
+  @IsOptional()
+  source?: TagSource;
+
+  @ApiProperty({
+    description: '标签状态（ACTIVE/BLOCKED）',
+    enum: TagStatus,
+    required: false,
+  })
+  @IsEnum(TagStatus)
+  @IsOptional()
+  status?: TagStatus;
 }
 
 export class UpdateTagDto extends PartialType(CreateTagDto) {}
+
+export class UpdateTagStatusDto {
+  /**
+   * 标签状态
+   */
+  @ApiProperty({
+    description: '标签状态（ACTIVE/BLOCKED）',
+    enum: TagStatus,
+  })
+  @IsEnum(TagStatus)
+  status: TagStatus;
+}
 
 export class CreateCategoryDto {
   /**

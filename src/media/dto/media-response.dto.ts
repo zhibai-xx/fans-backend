@@ -228,7 +228,6 @@ export class MediaResponseDto {
         height: quality.height,
       })) || [];
   }
-
 }
 
 export class MediaListResponseDto {

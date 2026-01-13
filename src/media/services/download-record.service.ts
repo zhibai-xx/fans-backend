@@ -22,7 +22,7 @@ export class DownloadRecordService {
       data: {
         user_id: userId,
         media_id: media.id,
-        media_type: media.media_type as MediaType,
+        media_type: media.media_type,
         file_name: fileName,
         file_type: fileType,
         file_size: media.size ?? null,

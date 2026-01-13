@@ -1,4 +1,6 @@
-export const convertToAccessibleUrl = (relativePath: string | null | undefined): string => {
+export const convertToAccessibleUrl = (
+  relativePath: string | null | undefined,
+): string => {
   if (!relativePath) return '';
 
   const cleanPath = relativePath.trim();

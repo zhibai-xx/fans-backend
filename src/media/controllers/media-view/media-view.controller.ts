@@ -51,7 +51,7 @@ export class MediaViewController {
     const sessionId =
       body.sessionId ||
       (typeof req.headers['x-session-id'] === 'string'
-        ? (req.headers['x-session-id'] as string)
+        ? req.headers['x-session-id']
         : undefined);
 
     const clientIp =

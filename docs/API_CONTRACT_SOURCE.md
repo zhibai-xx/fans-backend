@@ -24,6 +24,22 @@
   - `POST /user-uploads/:id/withdraw`：撤回待审核投稿
   - `DELETE /user-uploads/:id`：删除待审核/已拒绝/已发布作品（已发布会标记为 `USER_DELETED` 并进入软删流程）
 
+### 标签治理与创建策略
+- 标签字段新增：
+  - `normalized_name`：规范化名称（用于去重与搜索）
+  - `source`：`ADMIN/USER`
+  - `status`：`ACTIVE/BLOCKED`
+  - `created_by_id`/`created_by_type`：创建者归因（USER/ADMIN）
+- 标签查询规则：
+  - `GET /media/tags`、`GET /media/tags/search/:query` 仅返回 `status=ACTIVE` 的标签
+  - `GET /admin/tags` 返回全部标签（含 source/status）
+- 标签创建规则：
+  - `POST /media/tags`（需 JWT）：默认 `source=USER`，创建或返回已存在标签
+  - `POST /admin/tags`（管理员）：默认 `source=ADMIN`
+- 上传标签字段：
+  - `POST /upload/init` 与 `POST /upload/batch-init` 首选 `tagNames: string[]`
+  - 兼容保留 `tagIds: string[]` 作为历史字段，后端需同时处理
+
 ## 守护措施
 - 在 tests/ 中保留契约快照测试, 确保 message 字段类型保持字符串
 - 对 multipart/form-data 与分片上传接口标注 file schema 与 50MB 限制

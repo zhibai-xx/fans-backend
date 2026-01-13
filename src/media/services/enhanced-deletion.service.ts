@@ -170,7 +170,7 @@ export class EnhancedDeletionService {
     }
 
     // 原始文件（如果存在）
-    const sourceMetadataRaw = media.source_metadata as Prisma.JsonValue | null;
+    const sourceMetadataRaw = media.source_metadata;
     const sourceMetadata = isJsonObject(sourceMetadataRaw)
       ? sourceMetadataRaw
       : ({} as Prisma.JsonObject);
@@ -418,9 +418,9 @@ export class EnhancedDeletionService {
   /**
    * 获取待硬删除的媒体列表
    */
-  async getPendingHardDeletion(limit: number = 50): Promise<
-    Array<{ id: string; cleanup_scheduled_at: Date | null }>
-  > {
+  async getPendingHardDeletion(
+    limit: number = 50,
+  ): Promise<Array<{ id: string; cleanup_scheduled_at: Date | null }>> {
     try {
       const pending = await this.databaseService.media.findMany({
         where: {
@@ -488,22 +488,14 @@ function isJsonObject(
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-function getStringValue(
-  obj: Prisma.JsonObject,
-  key: string,
-): string | null {
+function getStringValue(obj: Prisma.JsonObject, key: string): string | null {
   const value = obj[key];
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
-function getNumberValue(
-  obj: Prisma.JsonObject,
-  key: string,
-): number | null {
+function getNumberValue(obj: Prisma.JsonObject, key: string): number | null {
   const value = obj[key];
-  return typeof value === 'number' && Number.isFinite(value)
-    ? value
-    : null;
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 function getObjectValue(

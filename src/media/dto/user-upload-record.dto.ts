@@ -19,10 +19,7 @@ export class UserUploadFiltersDto {
 
   @IsOptional()
   @IsString()
-  @IsIn([
-    MediaType.IMAGE,
-    MediaType.VIDEO,
-  ] as unknown as string[])
+  @IsIn([MediaType.IMAGE, MediaType.VIDEO] as unknown as string[])
   media_type?: string;
 
   @IsOptional()

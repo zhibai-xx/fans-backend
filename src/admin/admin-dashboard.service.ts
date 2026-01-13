@@ -429,8 +429,7 @@ export class AdminDashboardService {
           }审核`,
           description: `${media.user?.username || '未知用户'} 的${media.media_type.toLowerCase()}内容`,
           timestamp: media.updated_at.toISOString(),
-          status:
-            media.status === MediaStatus.APPROVED ? 'success' : 'warning',
+          status: media.status === MediaStatus.APPROVED ? 'success' : 'warning',
         });
       });
 

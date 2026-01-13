@@ -7,6 +7,8 @@ import {
   Body,
   Param,
   Query,
+  Patch,
+  Req,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -14,13 +16,18 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { AdminRoleGuard } from '../../auth/guards/admin-role.guard';
+import { TagCreatorType, TagSource } from '@prisma/client';
+import { Request as ExpressRequest } from 'express';
 import { MediaService } from '../media.service';
 import {
   CreateTagDto,
   CreateCategoryDto,
   UpdateTagDto,
+  UpdateTagStatusDto,
   UpdateCategoryDto,
 } from '../dto/create-tag.dto';
+
+type RequestWithUser = ExpressRequest & { user: { id: number } };
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, AdminRoleGuard)
@@ -55,9 +62,16 @@ export class AdminTagCategoryController {
    */
   @Post('tags')
   @HttpCode(HttpStatus.CREATED)
-  async createTag(@Body() createTagDto: CreateTagDto) {
+  async createTag(
+    @Body() createTagDto: CreateTagDto,
+    @Req() req: RequestWithUser,
+  ) {
     try {
-      const tag = await this.mediaService.createTag(createTagDto);
+      const tag = await this.mediaService.createTag(createTagDto, {
+        source: TagSource.ADMIN,
+        creatorId: req.user.id,
+        creatorType: TagCreatorType.ADMIN,
+      });
       return {
         success: true,
         data: tag,
@@ -97,6 +111,29 @@ export class AdminTagCategoryController {
   }
 
   /**
+   * 批量删除标签
+   */
+  @Delete('tags/batch')
+  @HttpCode(HttpStatus.OK)
+  async batchDeleteTags(@Body('ids') ids: string[]) {
+    try {
+      if (!Array.isArray(ids) || ids.length === 0) {
+        throw new BadRequestException('请选择要删除的标签');
+      }
+      await this.mediaService.batchDeleteTags(ids);
+      return {
+        success: true,
+        message: `成功下线 ${ids.length} 个标签`,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message || '批量删除标签失败',
+      };
+    }
+  }
+
+  /**
    * 删除标签
    */
   @Delete('tags/:id')
@@ -106,7 +143,7 @@ export class AdminTagCategoryController {
       await this.mediaService.deleteTag(id);
       return {
         success: true,
-        message: '标签删除成功',
+        message: '标签已下线',
       };
     } catch (error) {
       return {
@@ -117,21 +154,25 @@ export class AdminTagCategoryController {
   }
 
   /**
-   * 批量删除标签
+   * 更新标签状态（上线/下线）
    */
-  @Delete('tags/batch')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async batchDeleteTags(@Body('ids') ids: string[]) {
+  @Patch('tags/:id/status')
+  @HttpCode(HttpStatus.OK)
+  async updateTagStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateTagStatusDto,
+  ) {
     try {
-      await this.mediaService.batchDeleteTags(ids);
+      const tag = await this.mediaService.updateTagStatus(id, dto.status);
       return {
         success: true,
-        message: `成功删除 ${ids.length} 个标签`,
+        data: tag,
+        message: dto.status === 'ACTIVE' ? '标签已上线' : '标签已下线',
       };
     } catch (error) {
       return {
         success: false,
-        message: error.message || '批量删除标签失败',
+        message: error.message || '更新标签状态失败',
       };
     }
   }
@@ -209,6 +250,29 @@ export class AdminTagCategoryController {
   }
 
   /**
+   * 批量删除分类
+   */
+  @Delete('categories/batch')
+  @HttpCode(HttpStatus.OK)
+  async batchDeleteCategories(@Body('ids') ids: string[]) {
+    try {
+      if (!Array.isArray(ids) || ids.length === 0) {
+        throw new BadRequestException('请选择要删除的分类');
+      }
+      await this.mediaService.batchDeleteCategories(ids);
+      return {
+        success: true,
+        message: `成功删除 ${ids.length} 个分类`,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message || '批量删除分类失败',
+      };
+    }
+  }
+
+  /**
    * 删除分类
    */
   @Delete('categories/:id')
@@ -224,26 +288,6 @@ export class AdminTagCategoryController {
       return {
         success: false,
         message: error.message || '删除分类失败',
-      };
-    }
-  }
-
-  /**
-   * 批量删除分类
-   */
-  @Delete('categories/batch')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async batchDeleteCategories(@Body('ids') ids: string[]) {
-    try {
-      await this.mediaService.batchDeleteCategories(ids);
-      return {
-        success: true,
-        message: `成功删除 ${ids.length} 个分类`,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: error.message || '批量删除分类失败',
       };
     }
   }

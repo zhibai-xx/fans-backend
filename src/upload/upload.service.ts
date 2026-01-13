@@ -20,7 +20,14 @@ import {
   UploadProgressResponse,
   FileType,
 } from './dto/upload.dto';
-import { MediaSource, MediaType, Prisma } from '@prisma/client';
+import {
+  MediaSource,
+  MediaType,
+  Prisma,
+  TagCreatorType,
+  TagSource,
+  TagStatus,
+} from '@prisma/client';
 
 // 定义上传状态枚举
 enum UploadStatus {
@@ -268,6 +275,7 @@ export class UploadService {
             title: dto.title,
             description: dto.description,
             tagIds: dto.tagIds || [],
+            tagNames: dto.tagNames || [],
             categoryId: dto.categoryId,
             source: uploadSource,
           },
@@ -322,6 +330,7 @@ export class UploadService {
           title: dto.title,
           description: dto.description,
           tagIds: dto.tagIds || [],
+          tagNames: dto.tagNames || [],
           categoryId: dto.categoryId,
           source: uploadSource,
         },
@@ -533,8 +542,17 @@ export class UploadService {
 
       // 处理标签：将标签名称转换为标签ID
       let tagIds: string[] = [];
-      if (metadata.tagIds && metadata.tagIds.length > 0) {
-        tagIds = await this.resolveTagIds(metadata.tagIds);
+      const rawTagNames = Array.isArray(metadata.tagNames)
+        ? metadata.tagNames
+        : [];
+      const rawTagIds = Array.isArray(metadata.tagIds) ? metadata.tagIds : [];
+      if (rawTagNames.length > 0 || rawTagIds.length > 0) {
+        tagIds = await this.resolveUploadTagIds({
+          tagNames: rawTagNames,
+          tagIds: rawTagIds,
+          source: resolvedSource,
+          creatorId: userId,
+        });
       }
 
       // 提取图片尺寸信息
@@ -746,42 +764,88 @@ export class UploadService {
   }
 
   /**
-   * 将标签名称转换为标签ID，如果标签不存在则创建
-   * @param tagNames 标签名称数组
-   * @returns 标签ID数组
+   * 解析上传标签（兼容 tagNames/tagIds）
    */
-  private async resolveTagIds(tagNames: string[]): Promise<string[]> {
-    const tagIds: string[] = [];
+  private async resolveUploadTagIds(params: {
+    tagNames: string[];
+    tagIds: string[];
+    source: MediaSource;
+    creatorId: number;
+  }): Promise<string[]> {
+    if (params.tagNames.length > 0) {
+      return this.resolveTagIdsFromNames(
+        params.tagNames,
+        params.source,
+        params.creatorId,
+      );
+    }
 
-    for (const tagName of tagNames) {
-      if (!tagName || tagName.trim() === '') {
+    if (params.tagIds.length === 0) {
+      return [];
+    }
+
+    const allUuid = params.tagIds.every((id) => this.isUuid(id));
+    if (allUuid) {
+      const tags = await this.prisma.tag.findMany({
+        where: { id: { in: params.tagIds }, status: TagStatus.ACTIVE },
+        select: { id: true },
+      });
+      return tags.map((tag) => tag.id);
+    }
+
+    return this.resolveTagIdsFromNames(
+      params.tagIds,
+      params.source,
+      params.creatorId,
+    );
+  }
+
+  private async resolveTagIdsFromNames(
+    tagNames: string[],
+    source: MediaSource,
+    creatorId: number,
+  ): Promise<string[]> {
+    const tagIds: string[] = [];
+    const { tagSource, creatorType } = this.resolveTagSource(source);
+
+    for (const rawName of tagNames) {
+      const displayName = rawName.trim().replace(/\s+/g, ' ');
+      const normalizedName = this.normalizeTagName(displayName);
+      if (!normalizedName) {
         continue;
       }
 
-      const trimmedName = tagName.trim();
-
-      // 先查找是否存在该标签
       let tag = await this.prisma.tag.findUnique({
-        where: { name: trimmedName },
+        where: { normalized_name: normalizedName },
       });
 
-      // 如果不存在则创建
+      if (tag?.status === TagStatus.BLOCKED) {
+        this.logger.warn(`跳过被禁用标签: ${displayName}`);
+        continue;
+      }
+
       if (!tag) {
         try {
           tag = await this.prisma.tag.create({
-            data: { name: trimmedName },
+            data: {
+              name: displayName,
+              normalized_name: normalizedName,
+              source: tagSource,
+              status: TagStatus.ACTIVE,
+              created_by_id: creatorId,
+              created_by_type: creatorType,
+            },
           });
-          this.logger.log(`创建新标签: ${trimmedName}`);
+          this.logger.log(`创建新标签: ${displayName}`);
         } catch (error) {
-          // 处理并发创建的情况，可能其他请求已经创建了相同标签
-          if (error.code === 'P2002') {
-            // Prisma unique constraint error
+          const prismaError = error as { code?: string };
+          if (prismaError.code === 'P2002') {
             tag = await this.prisma.tag.findUnique({
-              where: { name: trimmedName },
+              where: { normalized_name: normalizedName },
             });
           }
-          if (!tag) {
-            this.logger.error(`创建标签失败: ${trimmedName}`, error);
+          if (!tag || tag.status === TagStatus.BLOCKED) {
+            this.logger.error(`创建标签失败: ${displayName}`, error);
             continue;
           }
         }
@@ -793,15 +857,33 @@ export class UploadService {
     return tagIds;
   }
 
+  private normalizeTagName(name: string): string {
+    return name.trim().replace(/\s+/g, ' ').toLowerCase();
+  }
+
+  private isUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value,
+    );
+  }
+
+  private resolveTagSource(source: MediaSource): {
+    tagSource: TagSource;
+    creatorType: TagCreatorType;
+  } {
+    if (source === MediaSource.USER_UPLOAD) {
+      return { tagSource: TagSource.USER, creatorType: TagCreatorType.USER };
+    }
+    return { tagSource: TagSource.ADMIN, creatorType: TagCreatorType.ADMIN };
+  }
+
   private resolveUserUploadSource(userRole?: string): MediaSource {
     return userRole === 'ADMIN'
       ? MediaSource.ADMIN_UPLOAD
       : MediaSource.USER_UPLOAD;
   }
 
-  private resolveMetadataSource(
-    metadata?: Record<string, any>,
-  ): MediaSource {
+  private resolveMetadataSource(metadata?: Record<string, any>): MediaSource {
     const candidate = metadata?.source;
     if (
       typeof candidate === 'string' &&
@@ -1013,16 +1095,12 @@ export class UploadService {
       let filePath: string | undefined;
       let fileName: string | undefined;
       try {
-        filePath =
-          typeof fileEntry === 'string' ? fileEntry : fileEntry.path;
+        filePath = typeof fileEntry === 'string' ? fileEntry : fileEntry.path;
         fileName =
           typeof fileEntry === 'string'
             ? path.basename(fileEntry)
             : fileEntry.name || path.basename(fileEntry.path);
-        const fileInfo = await this.getSystemIngestFileInfo(
-          filePath,
-          fileName,
-        );
+        const fileInfo = await this.getSystemIngestFileInfo(filePath, fileName);
 
         if (!fileInfo) {
           results.push({
@@ -1056,8 +1134,7 @@ export class UploadService {
               fileInfo.type === 'video' ? FileType.VIDEO : FileType.IMAGE,
             fileMd5,
             title: ingestInfo.title || fileName,
-            description:
-              ingestInfo.description || `系统导入文件: ${fileName}`,
+            description: ingestInfo.description || `系统导入文件: ${fileName}`,
             tagIds: [],
             ingestUserId: ingestInfo.ingestUserId,
             originalCreatedAt: ingestInfo.originalCreatedAt,
@@ -1085,10 +1162,7 @@ export class UploadService {
           );
         }
       } catch (error) {
-        this.logger.error(
-          `上传文件失败 ${filePath || '未知路径'}:`,
-          error,
-        );
+        this.logger.error(`上传文件失败 ${filePath || '未知路径'}:`, error);
         results.push({
           filePath,
           success: false,
@@ -1164,10 +1238,7 @@ export class UploadService {
   /**
    * 初始化系统导入上传
    */
-  private async initSystemIngestUpload(
-    dto: any,
-    userId: number,
-  ): Promise<any> {
+  private async initSystemIngestUpload(dto: any, userId: number): Promise<any> {
     try {
       // 检查是否已存在相同文件
       const existingUpload = await this.checkInstantUpload(dto.fileMd5, userId);

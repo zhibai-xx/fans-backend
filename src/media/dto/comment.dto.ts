@@ -179,7 +179,12 @@ export class CommentListQueryDto {
   @IsOptional()
   page?: number = 1;
 
-  @ApiPropertyOptional({ description: '每页数量', minimum: 1, maximum: 50, default: 20 })
+  @ApiPropertyOptional({
+    description: '每页数量',
+    minimum: 1,
+    maximum: 50,
+    default: 20,
+  })
   @Transform(({ value }) => {
     const parsed = Number(value);
     if (!Number.isFinite(parsed) || parsed <= 0) {

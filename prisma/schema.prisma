@@ -186,13 +186,36 @@ model Category {
   media      Media[]
 }
 
+enum TagSource {
+  ADMIN
+  USER
+}
+
+enum TagStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum TagCreatorType {
+  USER
+  ADMIN
+}
+
 model Tag {
-  id         String    @id @default(uuid())
-  name       String    @unique @db.VarChar(30) // 标签名（如"演唱会"、"生日纪念"）
-  created_at DateTime  @default(now())
+  id              String         @id @default(uuid())
+  name            String         @unique @db.VarChar(30) // 标签名（如"演唱会"、"生日纪念"）
+  normalized_name String         @unique @db.VarChar(30) // 规范化名称（用于去重与搜索）
+  source          TagSource      @default(USER)
+  status          TagStatus      @default(ACTIVE)
+  created_by_id   Int?
+  created_by_type TagCreatorType?
+  created_at      DateTime       @default(now())
 
   // 关联关系
   media_tags MediaTag[]
+
+  @@index([normalized_name])
+  @@index([source, status])
 }
 
 model MediaTag {

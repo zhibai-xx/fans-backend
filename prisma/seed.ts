@@ -5,6 +5,10 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 开始播种数据库...');
 
+  // 标签名称规范化：统一大小写与空白
+  const normalizeTagName = (name: string) =>
+    name.trim().replace(/\s+/g, ' ').toLowerCase();
+
   // 创建基础标签
   const tags = [
     { name: '演唱会' },
@@ -24,14 +28,21 @@ async function main() {
   console.log('📝 创建标签...');
   for (const tag of tags) {
     try {
+      const normalizedName = normalizeTagName(tag.name);
       await prisma.tag.upsert({
         where: { name: tag.name },
-        update: {},
-        create: tag,
+        update: {
+          normalized_name: normalizedName,
+        },
+        create: {
+          ...tag,
+          normalized_name: normalizedName,
+        },
       });
       console.log(`✅ 标签 "${tag.name}" 已创建`);
     } catch (error) {
-      console.log(`❌ 标签 "${tag.name}" 创建失败:`, error.message);
+      const message = error instanceof Error ? error.message : '未知错误';
+      console.log(`❌ 标签 "${tag.name}" 创建失败:`, message);
     }
   }
 

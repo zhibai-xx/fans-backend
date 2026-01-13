@@ -167,10 +167,7 @@ export class MediaCommentService {
       return [{ created_at: 'asc' }];
     }
     if (sort === 'hot') {
-      return [
-        { replies: { _count: 'desc' } },
-        { created_at: 'desc' },
-      ];
+      return [{ replies: { _count: 'desc' } }, { created_at: 'desc' }];
     }
     return [{ created_at: 'desc' }];
   }

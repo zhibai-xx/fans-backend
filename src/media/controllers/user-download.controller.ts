@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Query,
-  UseGuards,
-  Req,
-} from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, Req } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -21,9 +15,7 @@ type RequestWithUser = Request & { user: { id: number } };
 @ApiTags('用户下载记录')
 @Controller('user')
 export class UserDownloadController {
-  constructor(
-    private readonly downloadRecordService: DownloadRecordService,
-  ) {}
+  constructor(private readonly downloadRecordService: DownloadRecordService) {}
 
   @Get('downloads')
   @UseGuards(JwtAuthGuard)

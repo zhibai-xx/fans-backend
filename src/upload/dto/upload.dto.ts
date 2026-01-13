@@ -53,7 +53,13 @@ export class InitUploadDto {
   @IsOptional()
   description?: string;
 
-  @ApiProperty({ description: '标签ID列表', required: false })
+  @ApiProperty({ description: '标签名称列表（推荐）', required: false })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  tagNames?: string[];
+
+  @ApiProperty({ description: '标签ID列表（兼容字段）', required: false })
   @IsArray()
   @IsString({ each: true })
   @IsOptional()

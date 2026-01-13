@@ -19,9 +19,10 @@ export async function ensureUploadStructure() {
   await fs.ensureDir(PROCESSED_ROOT);
 }
 
-export async function migrateLegacyProcessedDirectory(
-  logger?: { log: (msg: string) => void; warn?: (msg: string) => void },
-) {
+export async function migrateLegacyProcessedDirectory(logger?: {
+  log: (msg: string) => void;
+  warn?: (msg: string) => void;
+}) {
   const legacyExists = await fs.pathExists(LEGACY_PROCESSED_ROOT);
   const newExists = await fs.pathExists(PROCESSED_ROOT);
 
