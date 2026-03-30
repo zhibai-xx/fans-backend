@@ -10,6 +10,11 @@ import { MyLoggerService } from './my-logger/my-logger.service';
 import { PrismaClientValidationError } from '@prisma/client/runtime/library';
 
 // 统一的错误响应格式
+type ExceptionResponseObject = {
+  message?: string | string[];
+  error?: string;
+};
+
 type MyResponseObj = {
   statusCode: number; // HTTP状态码
   timestamp: string; // 时间戳
@@ -51,21 +56,24 @@ export class AllExceptionsFilter extends BaseExceptionFilter {
         typeof exceptionResponse === 'object' &&
         exceptionResponse !== null
       ) {
-        const responseObj = exceptionResponse as any;
-        if (Array.isArray(responseObj.message)) {
+        const responseObj = exceptionResponse as ExceptionResponseObject;
+        const responseMessage = responseObj.message;
+        if (Array.isArray(responseMessage)) {
           // 将数组格式的验证错误转换为字符串
-          myResponseObj.message = responseObj.message.join('; ');
-        } else if (typeof responseObj.message === 'string') {
-          myResponseObj.message = responseObj.message;
+          myResponseObj.message = responseMessage.join('; ');
+        } else if (typeof responseMessage === 'string') {
+          myResponseObj.message = responseMessage;
+        } else if (typeof responseObj.error === 'string') {
+          myResponseObj.message = responseObj.error;
         } else {
-          myResponseObj.message = responseObj.error || 'Unknown error';
+          myResponseObj.message = 'Unknown error';
         }
       } else {
         myResponseObj.message = 'Unknown error';
       }
 
       // 设置错误类型
-      myResponseObj.error = this.getErrorType(myResponseObj.statusCode);
+      myResponseObj.error = this.getErrorType(exception.getStatus());
     } else if (exception instanceof PrismaClientValidationError) {
       // 处理Prisma客户端验证错误
       myResponseObj.statusCode = 422; // 无法处理的实体
@@ -86,7 +94,7 @@ export class AllExceptionsFilter extends BaseExceptionFilter {
     super.catch(exception, host);
   }
 
-  private getErrorType(status: number): string {
+  private getErrorType(status: HttpStatus): string {
     switch (status) {
       case HttpStatus.BAD_REQUEST:
         return 'Bad Request';

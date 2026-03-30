@@ -6,29 +6,54 @@ import * as path from 'path';
 import * as sharp from 'sharp';
 import { v4 as uuidv4 } from 'uuid';
 
+type OssConfig = {
+  region: string;
+  accessKeyId: string;
+  accessKeySecret: string;
+  bucket: string;
+  endpoint: string;
+  cdnBaseUrl?: string;
+};
+
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return '未知错误';
+};
+
+const getErrorStack = (error: unknown): string | undefined => {
+  return error instanceof Error ? error.stack : undefined;
+};
+
+const getOssConfig = (configService: ConfigService): OssConfig => {
+  const config = configService.get<OssConfig>('oss');
+  if (
+    !config ||
+    !config.region ||
+    !config.accessKeyId ||
+    !config.accessKeySecret ||
+    !config.bucket ||
+    !config.endpoint
+  ) {
+    throw new Error('OSS 配置缺失或不完整');
+  }
+  return config;
+};
+
 @Injectable()
 export class OssStorageService implements IStorageService {
-  private readonly client: OSS;
-  private readonly bucket: string;
-  private readonly cdnBaseUrl: string;
+  private client: OSS | null = null;
+  private bucket = '';
+  private cdnBaseUrl = '';
   private readonly logger = new Logger(OssStorageService.name);
 
   constructor(private configService: ConfigService) {
-    const ossConfig = this.configService.get('oss');
-
-    // 初始化OSS客户端
-    this.client = new OSS({
-      region: ossConfig.region,
-      accessKeyId: ossConfig.accessKeyId,
-      accessKeySecret: ossConfig.accessKeySecret,
-      bucket: ossConfig.bucket,
-      endpoint: ossConfig.endpoint,
-    });
-
-    this.bucket = ossConfig.bucket;
-    this.cdnBaseUrl =
-      ossConfig.cdnBaseUrl ||
-      `https://${ossConfig.bucket}.${ossConfig.endpoint}`;
+    // 当 USE_OSS_STORAGE=false 时，服务仍会被 Nest 实例化。
+    // 因此这里不能在构造阶段强制校验 OSS 配置，避免本地存储模式也启动失败。
   }
 
   /**
@@ -42,6 +67,7 @@ export class OssStorageService implements IStorageService {
     customPath?: string,
   ): Promise<string> {
     try {
+      const { client, cdnBaseUrl } = this.getClient();
       // 确定文件类型并选择合适的目录
       const isImage = file.mimetype.startsWith('image/');
       const isVideo = file.mimetype.startsWith('video/');
@@ -65,13 +91,14 @@ export class OssStorageService implements IStorageService {
       const ossPath = `${directory}${fileName}`;
 
       // 上传到OSS
-      const result = await this.client.put(ossPath, file.buffer);
+      const result = await client.put(ossPath, file.buffer);
 
       // 返回可访问的URL
-      return result.url || `${this.cdnBaseUrl}/${ossPath}`;
+      return result.url || `${cdnBaseUrl}/${ossPath}`;
     } catch (error) {
-      this.logger.error(`上传文件到OSS失败: ${error.message}`, error.stack);
-      throw new Error(`上传文件失败: ${error.message}`);
+      const message = getErrorMessage(error);
+      this.logger.error(`上传文件到OSS失败: ${message}`, getErrorStack(error));
+      throw new Error(`上传文件失败: ${message}`);
     }
   }
 
@@ -82,6 +109,7 @@ export class OssStorageService implements IStorageService {
    */
   async deleteFile(fileUrl: string): Promise<boolean> {
     try {
+      const { client } = this.getClient();
       // 从URL中提取文件路径
       const ossPath = this.getOssPathFromUrl(fileUrl);
       if (!ossPath) {
@@ -89,22 +117,27 @@ export class OssStorageService implements IStorageService {
       }
 
       // 删除文件
-      await this.client.delete(ossPath);
+      await client.delete(ossPath);
 
       // 尝试删除对应的缩略图（如果存在）
       try {
         const fileExt = path.extname(ossPath);
         const fileName = path.basename(ossPath, fileExt);
         const thumbnailPath = `thumbnails/thumb_${fileName}${fileExt}`;
-        await this.client.delete(thumbnailPath);
+        await client.delete(thumbnailPath);
       } catch (error) {
         // 缩略图可能不存在，忽略错误
-        this.logger.debug(`删除缩略图失败或缩略图不存在: ${error.message}`);
+        this.logger.debug(
+          `删除缩略图失败或缩略图不存在: ${getErrorMessage(error)}`,
+        );
       }
 
       return true;
     } catch (error) {
-      this.logger.error(`从OSS删除文件失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `从OSS删除文件失败: ${getErrorMessage(error)}`,
+        getErrorStack(error),
+      );
       return false;
     }
   }
@@ -117,9 +150,12 @@ export class OssStorageService implements IStorageService {
    */
   async generateThumbnail(
     file: Express.Multer.File,
-    customPath?: string,
+    originalUrl?: string,
   ): Promise<string> {
+    void originalUrl;
+
     try {
+      const { client, cdnBaseUrl } = this.getClient();
       // 仅处理图片文件
       if (!file.mimetype.startsWith('image/')) {
         this.logger.warn(`不支持为非图片文件生成缩略图: ${file.mimetype}`);
@@ -137,12 +173,15 @@ export class OssStorageService implements IStorageService {
       const ossPath = `thumbnails/${fileName}`;
 
       // 上传缩略图到OSS
-      const result = await this.client.put(ossPath, thumbnailBuffer);
+      const result = await client.put(ossPath, thumbnailBuffer);
 
       // 返回缩略图URL
-      return result.url || `${this.cdnBaseUrl}/${ossPath}`;
+      return result.url || `${cdnBaseUrl}/${ossPath}`;
     } catch (error) {
-      this.logger.error(`生成缩略图失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `生成缩略图失败: ${getErrorMessage(error)}`,
+        getErrorStack(error),
+      );
       return '';
     }
   }
@@ -174,8 +213,44 @@ export class OssStorageService implements IStorageService {
 
       return pathParts.join('/');
     } catch (error) {
-      this.logger.error(`解析URL失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `解析URL失败: ${getErrorMessage(error)}`,
+        getErrorStack(error),
+      );
       return ''; // 返回空字符串代替null
     }
+  }
+
+  private getClient(): {
+    client: OSS;
+    bucket: string;
+    cdnBaseUrl: string;
+  } {
+    if (this.client) {
+      return {
+        client: this.client,
+        bucket: this.bucket,
+        cdnBaseUrl: this.cdnBaseUrl,
+      };
+    }
+
+    const ossConfig = getOssConfig(this.configService);
+    this.client = new OSS({
+      region: ossConfig.region,
+      accessKeyId: ossConfig.accessKeyId,
+      accessKeySecret: ossConfig.accessKeySecret,
+      bucket: ossConfig.bucket,
+      endpoint: ossConfig.endpoint,
+    });
+    this.bucket = ossConfig.bucket;
+    this.cdnBaseUrl =
+      ossConfig.cdnBaseUrl ||
+      `https://${ossConfig.bucket}.${ossConfig.endpoint}`;
+
+    return {
+      client: this.client,
+      bucket: this.bucket,
+      cdnBaseUrl: this.cdnBaseUrl,
+    };
   }
 }

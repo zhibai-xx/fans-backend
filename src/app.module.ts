@@ -27,7 +27,7 @@ import { VideoProcessingModule } from './video-processing/video-processing.modul
       isGlobal: true,
       load: [uploadConfig, ossConfig, performanceConfig],
       validate,
-      envFilePath: ['.env'],
+      envFilePath: ['.env.local', '.env'],
     }),
     DatabaseModule,
     EmployeesModule,

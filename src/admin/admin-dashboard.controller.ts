@@ -9,6 +9,20 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminRoleGuard } from '../auth/guards/admin-role.guard';
 import { AdminDashboardService } from './admin-dashboard.service';
 
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return '未知错误';
+};
+
+const getErrorStack = (error: unknown): string | undefined => {
+  return error instanceof Error ? error.stack : undefined;
+};
+
 @ApiTags('管理面板')
 @Controller('admin/dashboard')
 @UseGuards(JwtAuthGuard, AdminRoleGuard)
@@ -32,10 +46,11 @@ export class AdminDashboardController {
         data: stats,
       };
     } catch (error) {
-      this.logger.error('获取管理面板统计数据失败:', error);
+      const message = getErrorMessage(error);
+      this.logger.error('获取管理面板统计数据失败:', getErrorStack(error));
       return {
         success: false,
-        message: error.message,
+        message,
       };
     }
   }
@@ -54,10 +69,11 @@ export class AdminDashboardController {
         data: activities,
       };
     } catch (error) {
-      this.logger.error('获取近期活动失败:', error);
+      const message = getErrorMessage(error);
+      this.logger.error('获取近期活动失败:', getErrorStack(error));
       return {
         success: false,
-        message: error.message,
+        message,
       };
     }
   }
@@ -76,10 +92,11 @@ export class AdminDashboardController {
         data: status,
       };
     } catch (error) {
-      this.logger.error('获取系统状态失败:', error);
+      const message = getErrorMessage(error);
+      this.logger.error('获取系统状态失败:', getErrorStack(error));
       return {
         success: false,
-        message: error.message,
+        message,
       };
     }
   }

@@ -1,5 +1,3 @@
-import { registerAs } from '@nestjs/config';
-
 export default () => ({
   useOssStorage: process.env.USE_OSS_STORAGE === 'true',
   localUploadDir: process.env.LOCAL_UPLOAD_DIR || './uploads',

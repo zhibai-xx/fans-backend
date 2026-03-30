@@ -23,7 +23,14 @@
     "typecheck": "tsc --noEmit",
     "test:unit": "jest --config tests/jest.unit.config.js",
     "test:integration": "jest --config tests/jest.integration.config.js",
-    "openapi:verify": "bash scripts/openapi:verify"
+    "openapi:verify": "bash scripts/openapi:verify",
+    "test:perf:baseline": "node tests/performance/public-endpoints.smoke.cjs",
+    "test:perf:ingest-scan": "node tests/performance/system-ingest-scan.smoke.cjs",
+    "test:perf:ingest-concurrency": "node tests/performance/system-ingest-concurrency.smoke.cjs",
+    "test:perf:upload-chunk-concurrency": "node tests/performance/upload-chunk-concurrency.smoke.cjs",
+    "test:security:smoke": "node tests/security/auth-download.smoke.cjs",
+    "test:resilience:redis-download": "node tests/resilience/redis-download-failure.smoke.cjs",
+    "test:storage:readiness": "node tests/readiness/storage-mode.smoke.cjs"
   },
   "dependencies": {
     "@nestjs/bullmq": "^10.2.3",

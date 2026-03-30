@@ -14,17 +14,51 @@ import { LoginDto } from '../dto/login.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
 import * as bcrypt from 'bcrypt';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserRole, UserStatus } from '@prisma/client';
 import * as path from 'path';
 import { promises as fsPromises } from 'fs';
 import * as Sharp from 'sharp';
 
-const sharp = ((Sharp as any).default || Sharp) as typeof import('sharp');
+type SharpModule = typeof import('sharp');
+type SharpModuleWithDefault = { default?: SharpModule };
+
+const resolveSharpModule = (
+  module: SharpModule | SharpModuleWithDefault,
+): SharpModule => {
+  if (typeof module === 'function') {
+    return module;
+  }
+  if (module.default && typeof module.default === 'function') {
+    return module.default;
+  }
+  return module as SharpModule;
+};
+const sharp: SharpModule = resolveSharpModule(
+  Sharp as SharpModule | SharpModuleWithDefault,
+);
 
 const AVATAR_API_PREFIX = '/api/upload/file/avatars';
 const DEFAULT_AVATAR_URL = `${AVATAR_API_PREFIX}/default.webp`;
 const ALLOWED_AVATAR_MIME = ['image/jpeg', 'image/png', 'image/webp'];
 export const AVATAR_MAX_SIZE = 2 * 1024 * 1024; // 2MB
+
+const toUserRole = (role?: string): UserRole | undefined => {
+  if (!role) {
+    return undefined;
+  }
+  return (Object.values(UserRole) as string[]).includes(role)
+    ? (role as UserRole)
+    : undefined;
+};
+
+const toUserStatus = (status?: string): UserStatus | undefined => {
+  if (!status) {
+    return undefined;
+  }
+  return (Object.values(UserStatus) as string[]).includes(status)
+    ? (status as UserStatus)
+    : undefined;
+};
 
 @Injectable()
 export class UserService {
@@ -105,6 +139,17 @@ export class UserService {
     return user;
   }
 
+  async bumpSessionVersion(userId: number) {
+    return this.databaseService.user.update({
+      where: { id: userId },
+      data: {
+        session_version: {
+          increment: 1,
+        },
+      },
+    });
+  }
+
   async updateUser(id: number, updateUserDto: UpdateUserDto) {
     const user = await this.databaseService.user.findUnique({
       where: { id },
@@ -141,7 +186,7 @@ export class UserService {
     }
 
     // 更新用户信息
-    const updateData: any = {};
+    const updateData: Prisma.UserUpdateInput = {};
 
     if (updateUserDto.username) updateData.username = updateUserDto.username;
     if (updateUserDto.email) updateData.email = updateUserDto.email;
@@ -353,7 +398,7 @@ export class UserService {
     } = filters;
 
     // 构建查询条件
-    const where: any = {};
+    const where: Prisma.UserWhereInput = {};
 
     if (search) {
       where.OR = [
@@ -363,12 +408,14 @@ export class UserService {
       ];
     }
 
-    if (role) {
-      where.role = role;
+    const roleValue = toUserRole(role);
+    if (roleValue) {
+      where.role = roleValue;
     }
 
-    if (status) {
-      where.status = status;
+    const statusValue = toUserStatus(status);
+    if (statusValue) {
+      where.status = statusValue;
     }
 
     const skip = (page - 1) * limit;

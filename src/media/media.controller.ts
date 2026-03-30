@@ -15,9 +15,7 @@ import {
   UseGuards,
   UseInterceptors,
   ClassSerializerInterceptor,
-  Res,
   NotFoundException,
-  Request,
 } from '@nestjs/common';
 import {
   MediaType,
@@ -25,9 +23,8 @@ import {
   TagCreatorType,
   TagSource,
 } from '@prisma/client';
-import { Throttle, SkipThrottle } from '@nestjs/throttler';
+import { SkipThrottle } from '@nestjs/throttler';
 import { MyLoggerService } from 'src/my-logger/my-logger.service';
-import { CreateMediaDto } from './dto/create-media.dto';
 import { UpdateMediaDto } from './dto/update-media.dto';
 import { CreateTagDto } from './dto/create-tag.dto';
 import { CreateCategoryDto } from './dto/create-category.dto';
@@ -54,12 +51,11 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { UserUploadFiltersDto } from './dto/user-upload-record.dto';
 
 // 扩展 Request 类型，定义需要的 user 属性
 // 注意：这个接口只用于类型定义，不会影响运行时的行为
 type RequestWithUser = ExpressRequest & {
-  user: { id: number; [key: string]: any };
+  user: { id: number; [key: string]: unknown };
 };
 
 @ApiTags('媒体')
@@ -341,7 +337,7 @@ export class MediaController {
   @Get('file/:path')
   @ApiOperation({ summary: '获取媒体文件' })
   @ApiResponse({ status: 200, description: '获取成功' })
-  serveMediaFile(@Param('path') path: string, @Req() req: Request) {
+  serveMediaFile(@Param('path') path: string) {
     // 这里通常需要通过一个特殊的中间件或服务来处理文件的提供
     // 在完整实现中，这里会返回文件内容或重定向到静态文件服务
     return { file: path };
@@ -430,7 +426,7 @@ export class MediaController {
   @ApiResponse({ status: 200, description: '获取成功', type: ReviewStatsDto })
   @ApiResponse({ status: 401, description: '未授权' })
   @ApiResponse({ status: 403, description: '需要管理员权限' })
-  async getReviewStats(@Req() req: any): Promise<ReviewStatsDto> {
+  async getReviewStats(): Promise<ReviewStatsDto> {
     this.logger.log('获取审核统计信息', MediaController.name);
     const stats = await this.mediaService.getReviewStats();
     return stats;

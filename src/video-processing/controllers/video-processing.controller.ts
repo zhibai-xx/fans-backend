@@ -9,6 +9,7 @@ import {
   UseGuards,
   HttpStatus,
   HttpCode,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -23,6 +24,7 @@ import {
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { AdminRoleGuard } from '../../auth/guards/admin-role.guard';
 import { MyLoggerService } from '../../my-logger/my-logger.service';
+import { ConfigService } from '@nestjs/config';
 
 export class SubmitProcessingJobDto {
   mediaId: string;
@@ -45,8 +47,8 @@ export class JobStatusResponseDto {
   result?: any;
   error?: string;
   createdAt: Date;
-  processedAt?: Date;
-  finishedAt?: Date;
+  processedAt?: Date | null;
+  finishedAt?: Date | null;
 }
 
 /**
@@ -60,7 +62,16 @@ export class JobStatusResponseDto {
 export class VideoProcessingController {
   private readonly logger = new MyLoggerService(VideoProcessingController.name);
 
-  constructor(private videoProcessingService: VideoProcessingService) {}
+  constructor(
+    private videoProcessingService: VideoProcessingService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  private ensureVideoFeatureEnabled(): void {
+    if (this.configService.get<string>('ENABLE_VIDEO_FEATURE') !== 'true') {
+      throw new BadRequestException('视频功能已关闭，当前阶段不开放视频处理');
+    }
+  }
 
   /**
    * 提交视频处理任务
@@ -84,6 +95,7 @@ export class VideoProcessingController {
   @ApiResponse({ status: 401, description: '未授权' })
   @HttpCode(HttpStatus.CREATED)
   async submitJob(@Body() dto: SubmitProcessingJobDto) {
+    this.ensureVideoFeatureEnabled();
     this.logger.log(`提交视频处理任务: ${dto.mediaId}`);
 
     const job: VideoProcessingJob = {
@@ -119,6 +131,7 @@ export class VideoProcessingController {
   async getJobStatus(
     @Param('jobId') jobId: string,
   ): Promise<JobStatusResponseDto> {
+    this.ensureVideoFeatureEnabled();
     this.logger.log(`获取任务状态: ${jobId}`);
 
     const status = await this.videoProcessingService.getJobStatus(jobId);
@@ -151,6 +164,7 @@ export class VideoProcessingController {
   @ApiResponse({ status: 404, description: '任务不存在' })
   @HttpCode(HttpStatus.OK)
   async cancelJob(@Param('jobId') jobId: string) {
+    this.ensureVideoFeatureEnabled();
     this.logger.log(`取消任务: ${jobId}`);
 
     const success = await this.videoProcessingService.cancelJob(jobId);
@@ -188,6 +202,7 @@ export class VideoProcessingController {
   @ApiResponse({ status: 403, description: '需要管理员权限' })
   @HttpCode(HttpStatus.OK)
   async cleanupFiles(@Param('mediaId') mediaId: string) {
+    this.ensureVideoFeatureEnabled();
     this.logger.log(`清理处理文件: ${mediaId}`);
 
     await this.videoProcessingService.cleanupProcessingFiles(mediaId);
@@ -222,7 +237,8 @@ export class VideoProcessingController {
   })
   @ApiResponse({ status: 401, description: '未授权' })
   @ApiResponse({ status: 403, description: '需要管理员权限' })
-  async getQueueStats() {
+  getQueueStats() {
+    this.ensureVideoFeatureEnabled();
     this.logger.log('获取队列统计信息');
 
     // 注意：这里需要访问队列实例来获取统计信息
@@ -262,7 +278,8 @@ export class VideoProcessingController {
   @ApiResponse({ status: 403, description: '需要管理员权限' })
   @ApiResponse({ status: 404, description: '任务不存在' })
   @HttpCode(HttpStatus.OK)
-  async retryJob(@Param('jobId') jobId: string) {
+  retryJob(@Param('jobId') jobId: string) {
+    this.ensureVideoFeatureEnabled();
     this.logger.log(`重试任务: ${jobId}`);
 
     // 实际实现需要从失败任务中获取原始数据并重新提交
@@ -302,11 +319,12 @@ export class VideoProcessingController {
   })
   @ApiResponse({ status: 401, description: '未授权' })
   @ApiResponse({ status: 403, description: '需要管理员权限' })
-  async getJobs(
+  getJobs(
     @Query('status') status?: string,
     @Query('limit') limit: number = 20,
     @Query('offset') offset: number = 0,
   ) {
+    this.ensureVideoFeatureEnabled();
     this.logger.log(
       `获取任务列表: status=${status}, limit=${limit}, offset=${offset}`,
     );
@@ -344,7 +362,8 @@ export class VideoProcessingController {
   @ApiResponse({ status: 401, description: '未授权' })
   @ApiResponse({ status: 403, description: '需要管理员权限' })
   @HttpCode(HttpStatus.OK)
-  async pauseQueue() {
+  pauseQueue() {
+    this.ensureVideoFeatureEnabled();
     this.logger.log('暂停队列');
 
     // 实际实现需要调用队列的暂停方法
@@ -376,7 +395,8 @@ export class VideoProcessingController {
   @ApiResponse({ status: 401, description: '未授权' })
   @ApiResponse({ status: 403, description: '需要管理员权限' })
   @HttpCode(HttpStatus.OK)
-  async resumeQueue() {
+  resumeQueue() {
+    this.ensureVideoFeatureEnabled();
     this.logger.log('恢复队列');
 
     // 实际实现需要调用队列的恢复方法

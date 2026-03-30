@@ -23,7 +23,6 @@ import {
 } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from 'src/database/database.service';
-import { CreateMediaDto } from './dto/create-media.dto';
 import { UpdateMediaDto } from './dto/update-media.dto';
 import { CreateTagDto } from './dto/create-tag.dto';
 import { CreateCategoryDto } from './dto/create-category.dto';
@@ -42,6 +41,7 @@ import { VideoProcessingService } from 'src/video-processing/services/video-proc
 import { ThumbnailService } from 'src/video-processing/services/thumbnail.service';
 import { EnhancedDeletionService } from './services/enhanced-deletion.service';
 import { DeletionSummary } from './dto/enhanced-delete.dto';
+import { UserUuidService } from 'src/auth/services/user-uuid.service';
 import * as path from 'path';
 import { convertToAccessibleUrl } from './utils/media-path.util';
 import {
@@ -70,6 +70,31 @@ type CreateTagOptions = {
   allowExisting?: boolean;
 };
 
+type AdminMediaFilters = {
+  status?: MediaStatus;
+  visibility?: MediaVisibility;
+  media_type?: MediaType;
+  category_id?: string;
+  user_id?: number;
+  search?: string;
+  date_range?: 'today' | 'week' | 'month';
+};
+
+type AdminMediaUpdatePayload = {
+  title?: string;
+  description?: string;
+  category_id?: string;
+  tag_ids?: string[];
+};
+
+type MediaRecordInput = {
+  url: string;
+  thumbnail_url: string | null;
+  source_metadata?: Prisma.JsonValue | null;
+  video_qualities?: Array<{ url: string | null }>;
+  user?: { avatar_url?: string | null };
+} & Record<string, unknown>;
+
 @Injectable()
 export class MediaService {
   private readonly logger = new MyLoggerService(MediaService.name);
@@ -85,6 +110,10 @@ export class MediaService {
     private readonly enhancedDeletionService: EnhancedDeletionService,
   ) {}
 
+  private isVideoFeatureEnabled(): boolean {
+    return this.configService.get<string>('ENABLE_VIDEO_FEATURE') === 'true';
+  }
+
   private clampCleanupDelay(days: number): number {
     return Math.min(
       Math.max(days, MIN_CLEANUP_DELAY_DAYS),
@@ -99,7 +128,9 @@ export class MediaService {
     if (typeof customDelay === 'number' && Number.isFinite(customDelay)) {
       return this.clampCleanupDelay(customDelay);
     }
-    const configuredRaw = this.configService.get('MEDIA_CLEANUP_DELAY_DAYS');
+    const configuredRaw = this.configService.get<string>(
+      'MEDIA_CLEANUP_DELAY_DAYS',
+    );
     const configured = Number(configuredRaw);
     if (Number.isFinite(configured)) {
       return this.clampCleanupDelay(configured);
@@ -183,6 +214,20 @@ export class MediaService {
     return value.filter((item): item is string => typeof item === 'string');
   }
 
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    if (typeof error === 'string') {
+      return error;
+    }
+    return '未知错误';
+  }
+
+  private getErrorStack(error: unknown): string | undefined {
+    return error instanceof Error ? error.stack : undefined;
+  }
+
   private async deletePhysicalFiles(
     media: Prisma.MediaGetPayload<{ include: { video_qualities: true } }>,
   ): Promise<void> {
@@ -193,7 +238,9 @@ export class MediaService {
       try {
         await storage.deleteFile(url);
       } catch (error) {
-        this.logger.warn(`删除文件失败 (${url}): ${(error as Error).message}`);
+        this.logger.warn(
+          `删除文件失败 (${url}): ${this.getErrorMessage(error)}`,
+        );
       }
     };
 
@@ -250,7 +297,7 @@ export class MediaService {
         await this.videoProcessingService.cleanupProcessingFiles(media.id);
       } catch (error) {
         this.logger.warn(
-          `清理处理文件失败 (${media.id}): ${(error as Error).message}`,
+          `清理处理文件失败 (${media.id}): ${this.getErrorMessage(error)}`,
         );
       }
     }
@@ -453,8 +500,8 @@ export class MediaService {
       });
     } catch (error) {
       this.logger.error(
-        `记录回收日志失败: ${(error as Error).message}`,
-        (error as Error).stack,
+        `记录回收日志失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
       );
     }
   }
@@ -507,6 +554,13 @@ export class MediaService {
     source_metadata?: Prisma.JsonValue;
   }) {
     try {
+      if (
+        data.media_type === MediaType.VIDEO &&
+        !this.isVideoFeatureEnabled()
+      ) {
+        throw new BadRequestException('视频功能已关闭，当前阶段仅开放图片内容');
+      }
+
       // 创建基本媒体记录
       const media = await this.databaseService.media.create({
         data: {
@@ -610,7 +664,7 @@ export class MediaService {
             this.logger.log(`⚡ 快速封面已生成并更新: ${media.id}`);
           } catch (thumbnailError) {
             this.logger.warn(
-              `快速封面生成失败: ${media.id}, ${thumbnailError.message}`,
+              `快速封面生成失败: ${media.id}, ${this.getErrorMessage(thumbnailError)}`,
             );
             this.logger.debug(
               `输入路径: ${inputPath}, 输出路径: ${quickCoverPath}`,
@@ -632,8 +686,8 @@ export class MediaService {
           this.logger.log(`📋 视频处理任务已提交: ${media.id}`);
         } catch (error) {
           this.logger.error(
-            `提交视频处理任务失败: ${media.id}, ${error.message}`,
-            error.stack,
+            `提交视频处理任务失败: ${media.id}, ${this.getErrorMessage(error)}`,
+            this.getErrorStack(error),
           );
           // 不阻塞媒体创建，只记录错误
         }
@@ -652,9 +706,12 @@ export class MediaService {
         },
       });
     } catch (error) {
-      this.logger.error(`创建媒体记录失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `创建媒体记录失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `创建媒体记录失败: ${error.message}`,
+        `创建媒体记录失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -890,8 +947,8 @@ export class MediaService {
         throw new NotFoundException('媒体不存在');
       }
       this.logger.error(
-        `增加观看次数失败: ${(error as Error).message}`,
-        (error as Error).stack,
+        `增加观看次数失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
       );
       throw error;
     }
@@ -1062,7 +1119,7 @@ export class MediaService {
         results.push({
           id: mediaId,
           success: false,
-          message: (error as Error).message,
+          message: this.getErrorMessage(error),
         });
       }
     }
@@ -1083,8 +1140,8 @@ export class MediaService {
       await this.cleanupExpiredRejectedMedia(options.limit ?? 50);
     } catch (error) {
       this.logger.error(
-        `清理被拒绝媒体文件失败: ${(error as Error).message}`,
-        (error as Error).stack,
+        `清理被拒绝媒体文件失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
       );
     }
 
@@ -1181,7 +1238,7 @@ export class MediaService {
         );
       } catch (error) {
         this.logger.error(
-          `清理被拒绝媒体文件失败: ${media.id} - ${(error as Error).message}`,
+          `清理被拒绝媒体文件失败: ${media.id} - ${this.getErrorMessage(error)}`,
         );
       }
     }
@@ -1416,9 +1473,12 @@ export class MediaService {
         usage_count: tag._count.media_tags,
       }));
     } catch (error) {
-      this.logger.error(`获取标签列表失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `获取标签列表失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `获取标签列表失败: ${error.message}`,
+        `获取标签列表失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -1466,13 +1526,18 @@ export class MediaService {
       this.logger.log(`创建新标签: ${tag.name}`, MediaService.name);
       return tag;
     } catch (error) {
-      this.logger.error(`创建标签失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `创建标签失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
 
       if (error instanceof BadRequestException) {
         throw error;
       }
 
-      throw new UnprocessableEntityException(`创建标签失败: ${error.message}`);
+      throw new UnprocessableEntityException(
+        `创建标签失败: ${this.getErrorMessage(error)}`,
+      );
     }
   }
 
@@ -1513,14 +1578,17 @@ export class MediaService {
         media: tag.media_tags.map((mt) => mt.media),
       };
     } catch (error) {
-      this.logger.error(`获取标签详情失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `获取标签详情失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
 
       if (error instanceof NotFoundException) {
         throw error;
       }
 
       throw new UnprocessableEntityException(
-        `获取标签详情失败: ${error.message}`,
+        `获取标签详情失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -1549,13 +1617,18 @@ export class MediaService {
       this.logger.log(`下线标签: ${tag.name}`, MediaService.name);
       return { success: true, message: '标签已下线' };
     } catch (error) {
-      this.logger.error(`删除标签失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `删除标签失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
 
       if (error instanceof NotFoundException) {
         throw error;
       }
 
-      throw new UnprocessableEntityException(`删除标签失败: ${error.message}`);
+      throw new UnprocessableEntityException(
+        `删除标签失败: ${this.getErrorMessage(error)}`,
+      );
     }
   }
 
@@ -1584,8 +1657,13 @@ export class MediaService {
         ...tag,
       }));
     } catch (error) {
-      this.logger.error(`搜索标签失败: ${error.message}`, error.stack);
-      throw new UnprocessableEntityException(`搜索标签失败: ${error.message}`);
+      this.logger.error(
+        `搜索标签失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
+      throw new UnprocessableEntityException(
+        `搜索标签失败: ${this.getErrorMessage(error)}`,
+      );
     }
   }
 
@@ -1618,9 +1696,12 @@ export class MediaService {
         media_count: category._count.media,
       }));
     } catch (error) {
-      this.logger.error(`获取分类列表失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `获取分类列表失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `获取分类列表失败: ${error.message}`,
+        `获取分类列表失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -1652,13 +1733,18 @@ export class MediaService {
       this.logger.log(`创建新分类: ${category.name}`, MediaService.name);
       return category;
     } catch (error) {
-      this.logger.error(`创建分类失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `创建分类失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
 
       if (error instanceof BadRequestException) {
         throw error;
       }
 
-      throw new UnprocessableEntityException(`创建分类失败: ${error.message}`);
+      throw new UnprocessableEntityException(
+        `创建分类失败: ${this.getErrorMessage(error)}`,
+      );
     }
   }
 
@@ -1692,14 +1778,17 @@ export class MediaService {
         media_count: category._count.media,
       };
     } catch (error) {
-      this.logger.error(`获取分类详情失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `获取分类详情失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
 
       if (error instanceof NotFoundException) {
         throw error;
       }
 
       throw new UnprocessableEntityException(
-        `获取分类详情失败: ${error.message}`,
+        `获取分类详情失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -1739,7 +1828,10 @@ export class MediaService {
       this.logger.log(`删除分类: ${category.name}`, MediaService.name);
       return { success: true, message: '分类已成功删除' };
     } catch (error) {
-      this.logger.error(`删除分类失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `删除分类失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
 
       if (
         error instanceof NotFoundException ||
@@ -1748,7 +1840,9 @@ export class MediaService {
         throw error;
       }
 
-      throw new UnprocessableEntityException(`删除分类失败: ${error.message}`);
+      throw new UnprocessableEntityException(
+        `删除分类失败: ${this.getErrorMessage(error)}`,
+      );
     }
   }
 
@@ -1789,7 +1883,10 @@ export class MediaService {
       this.logger.log(`更新分类: ${updatedCategory.name}`, MediaService.name);
       return updatedCategory;
     } catch (error) {
-      this.logger.error(`更新分类失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `更新分类失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
 
       if (
         error instanceof NotFoundException ||
@@ -1798,7 +1895,9 @@ export class MediaService {
         throw error;
       }
 
-      throw new UnprocessableEntityException(`更新分类失败: ${error.message}`);
+      throw new UnprocessableEntityException(
+        `更新分类失败: ${this.getErrorMessage(error)}`,
+      );
     }
   }
 
@@ -1907,7 +2006,10 @@ export class MediaService {
    * @param userUuidService 用户UUID服务
    * @returns 筛选后的媒体列表
    */
-  async getMediaForReview(filters: ReviewFilterDto, userUuidService: any) {
+  async getMediaForReview(
+    filters: ReviewFilterDto,
+    userUuidService: UserUuidService,
+  ) {
     const {
       type,
       status,
@@ -2074,10 +2176,10 @@ export class MediaService {
         );
       } catch (error) {
         failureIds.push(mediaId);
-        errors.push(`更新媒体 ${mediaId} 失败: ${error.message}`);
+        errors.push(`更新媒体 ${mediaId} 失败: ${this.getErrorMessage(error)}`);
         this.logger.error(
-          `批量更新媒体状态失败: ${error.message}`,
-          error.stack,
+          `批量更新媒体状态失败: ${this.getErrorMessage(error)}`,
+          this.getErrorStack(error),
         );
       }
     }
@@ -2174,10 +2276,12 @@ export class MediaService {
         this.logger.log(`管理员 ${adminId} 批量更新媒体 ${mediaId} 标签`);
       } catch (error) {
         failureIds.push(mediaId);
-        errors.push(`更新媒体 ${mediaId} 标签失败: ${error.message}`);
+        errors.push(
+          `更新媒体 ${mediaId} 标签失败: ${this.getErrorMessage(error)}`,
+        );
         this.logger.error(
-          `批量更新媒体标签失败: ${error.message}`,
-          error.stack,
+          `批量更新媒体标签失败: ${this.getErrorMessage(error)}`,
+          this.getErrorStack(error),
         );
       }
     }
@@ -2233,7 +2337,7 @@ export class MediaService {
         }
 
         // 准备更新数据
-        const updateData: any = {
+        const updateData: Prisma.MediaUpdateInput = {
           updated_at: new Date(),
         };
 
@@ -2261,10 +2365,12 @@ export class MediaService {
         );
       } catch (error) {
         failureIds.push(mediaId);
-        errors.push(`更新媒体 ${mediaId} 分类失败: ${error.message}`);
+        errors.push(
+          `更新媒体 ${mediaId} 分类失败: ${this.getErrorMessage(error)}`,
+        );
         this.logger.error(
-          `批量更新媒体分类失败: ${error.message}`,
-          error.stack,
+          `批量更新媒体分类失败: ${this.getErrorMessage(error)}`,
+          this.getErrorStack(error),
         );
       }
     }
@@ -2329,7 +2435,7 @@ export class MediaService {
       }
 
       // 构建更新数据
-      const updateData: any = {
+      const updateData: Prisma.MediaUpdateInput = {
         updated_at: new Date(),
       };
 
@@ -2363,7 +2469,7 @@ export class MediaService {
       }
 
       // 使用事务更新媒体信息和标签
-      const result = await this.databaseService.$transaction(async (prisma) => {
+      await this.databaseService.$transaction(async (prisma) => {
         // 更新基本信息
         const updatedMedia = await prisma.media.update({
           where: { id },
@@ -2416,7 +2522,10 @@ export class MediaService {
         },
       });
     } catch (error) {
-      this.logger.error(`更新媒体信息失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `更新媒体信息失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
 
       if (
         error instanceof NotFoundException ||
@@ -2427,7 +2536,7 @@ export class MediaService {
       }
 
       throw new UnprocessableEntityException(
-        `更新媒体信息失败: ${error.message}`,
+        `更新媒体信息失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -2496,9 +2605,12 @@ export class MediaService {
 
       return result;
     } catch (error) {
-      this.logger.error(`获取用户上传统计失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `获取用户上传统计失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `获取上传统计失败: ${error.message}`,
+        `获取上传统计失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -2564,9 +2676,12 @@ export class MediaService {
         topUsers,
       };
     } catch (error) {
-      this.logger.error(`获取用户上传统计失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `获取用户上传统计失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `获取用户上传统计失败: ${error.message}`,
+        `获取用户上传统计失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -2679,6 +2794,13 @@ export class MediaService {
                 nickname: true,
               },
             },
+            reviewer: {
+              select: {
+                id: true,
+                username: true,
+                avatar_url: true,
+              },
+            },
             category: {
               select: {
                 id: true,
@@ -2719,14 +2841,14 @@ export class MediaService {
         width: record.width,
         height: record.height,
         status: record.status,
-        review_comment: (record as any).review_comment,
-        reviewed_by: (record as any).reviewed_by,
-        reviewed_at: (record as any).reviewed_at,
-        reviewer: (record as any).reviewer,
+        review_comment: record.review_comment,
+        reviewed_by: record.reviewed_by,
+        reviewed_at: record.reviewed_at,
+        reviewer: record.reviewer,
         views: record.views,
         likes_count: record.likes_count,
-        category: (record as any).category,
-        tags: (record as any).tags?.map((mt: any) => mt.tag) || [],
+        category: record.category,
+        tags: record.media_tags.map((mediaTag) => mediaTag.tag),
         created_at: record.created_at,
         updated_at: record.updated_at,
       }));
@@ -2740,9 +2862,12 @@ export class MediaService {
         stats,
       };
     } catch (error) {
-      this.logger.error(`获取用户上传记录失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `获取用户上传记录失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `获取上传记录失败: ${error.message}`,
+        `获取上传记录失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -2811,7 +2936,10 @@ export class MediaService {
 
       return { success: true };
     } catch (error) {
-      this.logger.error(`删除用户媒体失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `删除用户媒体失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
 
       if (
         error instanceof NotFoundException ||
@@ -2820,7 +2948,9 @@ export class MediaService {
         throw error;
       }
 
-      throw new UnprocessableEntityException(`删除媒体失败: ${error.message}`);
+      throw new UnprocessableEntityException(
+        `删除媒体失败: ${this.getErrorMessage(error)}`,
+      );
     }
   }
 
@@ -2867,7 +2997,10 @@ export class MediaService {
 
       return { success: true };
     } catch (error) {
-      this.logger.error(`撤回媒体失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `撤回媒体失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
 
       if (
         error instanceof NotFoundException ||
@@ -2876,7 +3009,9 @@ export class MediaService {
         throw error;
       }
 
-      throw new UnprocessableEntityException(`撤回媒体失败: ${error.message}`);
+      throw new UnprocessableEntityException(
+        `撤回媒体失败: ${this.getErrorMessage(error)}`,
+      );
     }
   }
 
@@ -2910,7 +3045,10 @@ export class MediaService {
         resetReview: false,
       });
     } catch (error) {
-      this.logger.error(`更新用户媒体失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `更新用户媒体失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
 
       if (
         error instanceof NotFoundException ||
@@ -2919,7 +3057,9 @@ export class MediaService {
         throw error;
       }
 
-      throw new UnprocessableEntityException(`更新失败: ${error.message}`);
+      throw new UnprocessableEntityException(
+        `更新失败: ${this.getErrorMessage(error)}`,
+      );
     }
   }
 
@@ -2969,7 +3109,10 @@ export class MediaService {
       );
       return updatedMedia;
     } catch (error) {
-      this.logger.error(`重新提交媒体失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `重新提交媒体失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
 
       if (
         error instanceof NotFoundException ||
@@ -2978,7 +3121,9 @@ export class MediaService {
         throw error;
       }
 
-      throw new UnprocessableEntityException(`重新提交失败: ${error.message}`);
+      throw new UnprocessableEntityException(
+        `重新提交失败: ${this.getErrorMessage(error)}`,
+      );
     }
   }
 
@@ -3012,9 +3157,12 @@ export class MediaService {
 
       return tags;
     } catch (error) {
-      this.logger.error(`获取标签统计失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `获取标签统计失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `获取标签统计失败: ${error.message}`,
+        `获取标签统计失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -3059,9 +3207,12 @@ export class MediaService {
 
       return categories;
     } catch (error) {
-      this.logger.error(`获取分类统计失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `获取分类统计失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `获取分类统计失败: ${error.message}`,
+        `获取分类统计失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -3112,14 +3263,19 @@ export class MediaService {
       this.logger.log(`更新标签: ${id} -> ${displayName}`, MediaService.name);
       return updatedTag;
     } catch (error) {
-      this.logger.error(`更新标签失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `更新标签失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       if (
         error instanceof NotFoundException ||
         error instanceof BadRequestException
       ) {
         throw error;
       }
-      throw new UnprocessableEntityException(`更新标签失败: ${error.message}`);
+      throw new UnprocessableEntityException(
+        `更新标签失败: ${this.getErrorMessage(error)}`,
+      );
     }
   }
 
@@ -3144,13 +3300,13 @@ export class MediaService {
         data: { status },
       });
 
-      this.logger.log(
-        `更新标签状态: ${id} -> ${status}`,
-        MediaService.name,
-      );
+      this.logger.log(`更新标签状态: ${id} -> ${status}`, MediaService.name);
       return updatedTag;
     } catch (error) {
-      this.logger.error(`更新标签状态失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `更新标签状态失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       if (
         error instanceof NotFoundException ||
         error instanceof BadRequestException
@@ -3158,7 +3314,7 @@ export class MediaService {
         throw error;
       }
       throw new UnprocessableEntityException(
-        `更新标签状态失败: ${error.message}`,
+        `更新标签状态失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -3176,9 +3332,12 @@ export class MediaService {
 
       this.logger.log(`批量删除标签: ${ids.join(', ')}`, MediaService.name);
     } catch (error) {
-      this.logger.error(`批量删除标签失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `批量删除标签失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `批量删除标签失败: ${error.message}`,
+        `批量删除标签失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -3212,9 +3371,12 @@ export class MediaService {
 
       this.logger.log(`批量删除分类: ${ids.join(', ')}`, MediaService.name);
     } catch (error) {
-      this.logger.error(`批量删除分类失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `批量删除分类失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `批量删除分类失败: ${error.message}`,
+        `批量删除分类失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -3273,7 +3435,7 @@ export class MediaService {
           total_tags: tagCount,
           total_categories: categoryCount,
           unused_tags: tagUsageStats.filter(
-            (tag) => (tag as any)._count.media_tags === 0,
+            (tag) => tag._count.media_tags === 0,
           ).length,
           unused_categories: categoryUsageStats.filter(
             (cat) => cat._count.media === 0,
@@ -3282,7 +3444,7 @@ export class MediaService {
         top_tags: tagUsageStats.map((tag) => ({
           id: tag.id,
           name: tag.name,
-          usage_count: (tag as any)._count.media_tags,
+          usage_count: tag._count.media_tags,
         })),
         top_categories: categoryUsageStats.map((cat) => ({
           id: cat.id,
@@ -3292,9 +3454,12 @@ export class MediaService {
         })),
       };
     } catch (error) {
-      this.logger.error(`获取统计信息失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `获取统计信息失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `获取统计信息失败: ${error.message}`,
+        `获取统计信息失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -3380,9 +3545,12 @@ export class MediaService {
         },
       };
     } catch (error) {
-      this.logger.error(`获取媒体统计失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `获取媒体统计失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `获取媒体统计失败: ${error.message}`,
+        `获取媒体统计失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -3398,7 +3566,7 @@ export class MediaService {
    */
   async updateMediaStatusByAdmin(
     id: string,
-    status: any,
+    status: MediaStatus,
     reviewComment?: string,
   ) {
     try {
@@ -3414,10 +3582,9 @@ export class MediaService {
       }
 
       const previousStatus = media.status;
-      const nextStatus = status as MediaStatus;
       const updateData = this.buildStatusUpdatePayload(
         previousStatus,
-        nextStatus,
+        status,
         reviewComment,
       );
 
@@ -3447,12 +3614,15 @@ export class MediaService {
       );
       return updatedMedia;
     } catch (error) {
-      this.logger.error(`更新媒体状态失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `更新媒体状态失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       if (error instanceof NotFoundException) {
         throw error;
       }
       throw new UnprocessableEntityException(
-        `更新媒体状态失败: ${error.message}`,
+        `更新媒体状态失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -3473,7 +3643,10 @@ export class MediaService {
    * @param updateData 更新数据
    * @returns 更新后的媒体
    */
-  async updateMediaInfoByAdmin(id: string, updateData: any) {
+  async updateMediaInfoByAdmin(
+    id: string,
+    updateData: AdminMediaUpdatePayload,
+  ) {
     try {
       const media = await this.databaseService.media.findUnique({
         where: { id },
@@ -3484,40 +3657,38 @@ export class MediaService {
       }
 
       // 使用事务更新媒体信息
-      const updatedMedia = await this.databaseService.$transaction(
-        async (prisma) => {
-          // 更新基本信息
-          const updated = await prisma.media.update({
-            where: { id },
-            data: {
-              title: updateData.title,
-              description: updateData.description,
-              category_id: updateData.category_id,
-              updated_at: new Date(),
-            },
+      await this.databaseService.$transaction(async (prisma) => {
+        // 更新基本信息
+        const updated = await prisma.media.update({
+          where: { id },
+          data: {
+            title: updateData.title,
+            description: updateData.description,
+            category_id: updateData.category_id,
+            updated_at: new Date(),
+          },
+        });
+
+        // 更新标签关联
+        if (updateData.tag_ids !== undefined) {
+          // 删除现有标签关联
+          await prisma.mediaTag.deleteMany({
+            where: { media_id: id },
           });
 
-          // 更新标签关联
-          if (updateData.tag_ids !== undefined) {
-            // 删除现有标签关联
-            await prisma.mediaTag.deleteMany({
-              where: { media_id: id },
+          // 创建新的标签关联
+          if (updateData.tag_ids.length > 0) {
+            await prisma.mediaTag.createMany({
+              data: updateData.tag_ids.map((tagId: string) => ({
+                media_id: id,
+                tag_id: tagId,
+              })),
             });
-
-            // 创建新的标签关联
-            if (updateData.tag_ids.length > 0) {
-              await prisma.mediaTag.createMany({
-                data: updateData.tag_ids.map((tagId: string) => ({
-                  media_id: id,
-                  tag_id: tagId,
-                })),
-              });
-            }
           }
+        }
 
-          return updated;
-        },
-      );
+        return updated;
+      });
 
       // 获取完整的媒体信息返回
       const fullMedia = await this.databaseService.media.findUnique({
@@ -3542,12 +3713,15 @@ export class MediaService {
       this.logger.log(`管理员更新媒体 ${id} 信息`, MediaService.name);
       return fullMedia;
     } catch (error) {
-      this.logger.error(`更新媒体信息失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `更新媒体信息失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       if (error instanceof NotFoundException) {
         throw error;
       }
       throw new UnprocessableEntityException(
-        `更新媒体信息失败: ${error.message}`,
+        `更新媒体信息失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -3581,9 +3755,12 @@ export class MediaService {
         created_at: category.created_at,
       }));
     } catch (error) {
-      this.logger.error(`获取分类使用统计失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `获取分类使用统计失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `获取分类使用统计失败: ${error.message}`,
+        `获取分类使用统计失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -3612,13 +3789,16 @@ export class MediaService {
       return tags.map((tag) => ({
         id: tag.id,
         name: tag.name,
-        usage_count: (tag as any)._count.media_tags,
+        usage_count: tag._count.media_tags,
         created_at: tag.created_at,
       }));
     } catch (error) {
-      this.logger.error(`获取标签使用统计失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `获取标签使用统计失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `获取标签使用统计失败: ${error.message}`,
+        `获取标签使用统计失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -3626,7 +3806,11 @@ export class MediaService {
   /**
    * 获取所有媒体内容（管理员专用）
    */
-  async getAllMediaForAdmin(filters: any, page: number, limit: number) {
+  async getAllMediaForAdmin(
+    filters: AdminMediaFilters,
+    page: number,
+    limit: number,
+  ) {
     try {
       const skip = (page - 1) * limit;
       const where: Prisma.MediaWhereInput = {
@@ -3738,11 +3922,11 @@ export class MediaService {
       };
     } catch (error) {
       this.logger.error(
-        `获取管理员媒体列表失败: ${error.message}`,
-        error.stack,
+        `获取管理员媒体列表失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
       );
       throw new UnprocessableEntityException(
-        `获取管理员媒体列表失败: ${error.message}`,
+        `获取管理员媒体列表失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -3842,9 +4026,12 @@ export class MediaService {
         recentActivity,
       };
     } catch (error) {
-      this.logger.error(`获取媒体统计失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `获取媒体统计失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `获取媒体统计失败: ${error.message}`,
+        `获取媒体统计失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -3897,9 +4084,12 @@ export class MediaService {
         failedCount,
       };
     } catch (error) {
-      this.logger.error(`批量更新媒体状态失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `批量更新媒体状态失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `批量更新媒体状态失败: ${error.message}`,
+        `批量更新媒体状态失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -3950,9 +4140,12 @@ export class MediaService {
       );
       return media;
     } catch (error) {
-      this.logger.error(`更新媒体可见状态失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `更新媒体可见状态失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `更新媒体可见状态失败: ${error.message}`,
+        `更新媒体可见状态失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -3987,11 +4180,11 @@ export class MediaService {
       };
     } catch (error) {
       this.logger.error(
-        `批量更新媒体可见状态失败: ${error.message}`,
-        error.stack,
+        `批量更新媒体可见状态失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
       );
       throw new UnprocessableEntityException(
-        `批量更新媒体可见状态失败: ${error.message}`,
+        `批量更新媒体可见状态失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
@@ -4039,17 +4232,28 @@ export class MediaService {
 
       return this.normalizeMediaRecord(media);
     } catch (error) {
-      this.logger.error(`获取媒体详情失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `获取媒体详情失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw new UnprocessableEntityException(
-        `获取媒体详情失败: ${error.message}`,
+        `获取媒体详情失败: ${this.getErrorMessage(error)}`,
       );
     }
   }
 
-  private normalizeMediaRecord(media: any) {
+  private normalizeMediaRecord(media: MediaRecordInput) {
     if (!media) {
       return media;
     }
+
+    const metadata = this.isJsonObject(media.source_metadata)
+      ? media.source_metadata
+      : null;
+    const originalFileUrl =
+      metadata && typeof metadata.original_file_url === 'string'
+        ? metadata.original_file_url
+        : undefined;
 
     const normalized = {
       ...media,
@@ -4057,14 +4261,12 @@ export class MediaService {
       thumbnail_url: media.thumbnail_url
         ? convertToAccessibleUrl(media.thumbnail_url)
         : undefined,
-      original_file_url: media.source_metadata?.original_file_url
-        ? convertToAccessibleUrl(
-            media.source_metadata.original_file_url as string,
-          )
+      original_file_url: originalFileUrl
+        ? convertToAccessibleUrl(originalFileUrl)
         : convertToAccessibleUrl(media.url),
-      video_qualities: (media.video_qualities || []).map((quality: any) => ({
+      video_qualities: (media.video_qualities || []).map((quality) => ({
         ...quality,
-        url: convertToAccessibleUrl(quality.url),
+        url: convertToAccessibleUrl(quality.url ?? media.url),
       })),
     };
 
@@ -4130,7 +4332,7 @@ export class MediaService {
       // 开始事务更新
       const result = await this.databaseService.$transaction(async (prisma) => {
         // 更新基本信息
-        const updatedMedia = await prisma.media.update({
+        await prisma.media.update({
           where: { id },
           data: {
             title: updateData.title,
@@ -4195,11 +4397,11 @@ export class MediaService {
       return result;
     } catch (error) {
       this.logger.error(
-        `管理员更新媒体信息失败: ${error.message}`,
-        error.stack,
+        `管理员更新媒体信息失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
       );
       throw new UnprocessableEntityException(
-        `更新媒体信息失败: ${error.message}`,
+        `更新媒体信息失败: ${this.getErrorMessage(error)}`,
       );
     }
   }

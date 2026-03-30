@@ -1,7 +1,92 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { MediaType, MediaStatus } from '@prisma/client';
+import { MediaType, MediaStatus, Prisma } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import { convertToAccessibleUrl } from '../utils/media-path.util';
+
+type MediaTagRelation = {
+  tag: {
+    id: string;
+    name: string;
+  };
+};
+
+type MediaResponseInput = {
+  id: string;
+  title: string;
+  description?: string | null;
+  url: string;
+  thumbnail_url?: string | null;
+  size: number;
+  media_type: MediaType;
+  duration?: number | null;
+  width?: number | null;
+  height?: number | null;
+  status: MediaStatus;
+  views: number;
+  likes_count: number;
+  favorites_count: number;
+  source: string;
+  original_created_at?: Date | string | null;
+  source_metadata?: Prisma.JsonValue | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+  user?: {
+    username?: string | null;
+    avatar_url?: string | null;
+  } | null;
+  category?: {
+    id: string;
+    name: string;
+    description?: string | null;
+  } | null;
+  media_tags?: MediaTagRelation[];
+  video_qualities?: Array<{
+    id: string;
+    quality: string;
+    url: string;
+    size: number;
+    width: number;
+    height: number;
+  }>;
+};
+
+type MediaListMeta = {
+  total: number;
+};
+
+const isJsonObject = (
+  value: Prisma.JsonValue | null | undefined,
+): value is Prisma.JsonObject =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const toIsoStringValue = (value: unknown): string => {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+  return new Date().toISOString();
+};
+
+const toIsoStringOrNull = (value: unknown): string | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+  return null;
+};
 
 export class MediaUserDto {
   @ApiProperty({ description: '用户UUID' })
@@ -106,22 +191,18 @@ export class MediaResponseDto {
     description: '原始创建时间（来源平台发布时间等）',
     required: false,
   })
-  @Transform(({ value }) => (value ? new Date(value).toISOString() : null))
-  original_created_at?: Date;
+  @Transform(({ value }) => toIsoStringOrNull(value))
+  original_created_at?: string | null;
 
   @ApiProperty({ description: '来源相关元数据', required: false })
-  source_metadata?: any;
+  source_metadata?: Prisma.JsonValue;
 
   @ApiProperty({ description: '创建时间' })
-  @Transform(({ value }) =>
-    value ? new Date(value).toISOString() : new Date().toISOString(),
-  )
+  @Transform(({ value }) => toIsoStringValue(value))
   created_at: string;
 
   @ApiProperty({ description: '更新时间' })
-  @Transform(({ value }) =>
-    value ? new Date(value).toISOString() : new Date().toISOString(),
-  )
+  @Transform(({ value }) => toIsoStringValue(value))
   updated_at: string;
 
   @ApiProperty({ description: '用户信息', type: MediaUserDto })
@@ -152,10 +233,10 @@ export class MediaResponseDto {
   })
   video_qualities?: VideoQualityDto[];
 
-  constructor(media: any, userUuid: string) {
+  constructor(media: MediaResponseInput, userUuid: string) {
     this.id = media.id;
     this.title = media.title;
-    this.description = media.description;
+    this.description = media.description ?? undefined;
 
     // 修复URL路径 - 转换为完整的可访问URL
     this.url = convertToAccessibleUrl(media.url);
@@ -165,31 +246,43 @@ export class MediaResponseDto {
 
     this.size = media.size;
     this.media_type = media.media_type;
-    this.duration = media.duration;
-    this.width = media.width;
-    this.height = media.height;
+    this.duration = media.duration ?? undefined;
+    this.width = media.width ?? undefined;
+    this.height = media.height ?? undefined;
     this.status = media.status;
     this.views = media.views;
     this.likes_count = media.likes_count;
     this.favorites_count = media.favorites_count;
     this.source = media.source;
-    this.original_created_at = media.original_created_at;
+    const originalCreatedAt = toIsoStringOrNull(media.original_created_at);
+    this.original_created_at = originalCreatedAt ?? undefined;
     this.source_metadata = media.source_metadata;
+    const metadata = isJsonObject(media.source_metadata)
+      ? media.source_metadata
+      : null;
     const originalFileUrl =
-      media.source_metadata?.original_file_url || media.url;
+      metadata && typeof metadata.original_file_url === 'string'
+        ? metadata.original_file_url
+        : media.url;
     this.original_file_url = originalFileUrl
       ? convertToAccessibleUrl(originalFileUrl)
       : undefined;
 
     // 直接赋值，让@Transform装饰器处理序列化
-    this.created_at = media.created_at;
-    this.updated_at = media.updated_at;
+    this.created_at =
+      typeof media.created_at === 'string'
+        ? media.created_at
+        : toIsoStringValue(media.created_at);
+    this.updated_at =
+      typeof media.updated_at === 'string'
+        ? media.updated_at
+        : toIsoStringValue(media.updated_at);
 
     // 用户信息（使用UUID）
     this.user = {
       uuid: userUuid,
-      username: media.user?.username || '',
-      avatar_url: media.user?.avatar_url,
+      username: media.user?.username ?? '',
+      avatar_url: media.user?.avatar_url ?? undefined,
     };
 
     // 分类信息
@@ -197,20 +290,20 @@ export class MediaResponseDto {
       ? {
           id: media.category.id,
           name: media.category.name,
-          description: media.category.description,
+          description: media.category.description ?? undefined,
         }
       : undefined;
 
     // 标签信息 - 修复：使用media_tags而不是tags
     this.tags =
-      media.media_tags?.map((mediaTag: any) => ({
+      media.media_tags?.map((mediaTag) => ({
         id: mediaTag.tag.id,
         name: mediaTag.tag.name,
       })) || [];
 
     // 兼容审核页面的标签格式
     this.media_tags =
-      media.media_tags?.map((mediaTag: any) => ({
+      media.media_tags?.map((mediaTag) => ({
         tag: {
           id: mediaTag.tag.id,
           name: mediaTag.tag.name,
@@ -219,7 +312,7 @@ export class MediaResponseDto {
 
     // 处理视频质量数据（仅对视频类型有效）
     this.video_qualities =
-      media.video_qualities?.map((quality: any) => ({
+      media.video_qualities?.map((quality) => ({
         id: quality.id,
         quality: quality.quality,
         url: convertToAccessibleUrl(quality.url), // 🔑 关键：也要转换video_qualities的URL
@@ -247,7 +340,7 @@ export class MediaListResponseDto {
 
   constructor(
     data: MediaResponseDto[],
-    meta: any,
+    meta: MediaListMeta,
     skip: number = 0,
     take: number = 20,
   ) {

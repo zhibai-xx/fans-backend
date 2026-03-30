@@ -36,6 +36,19 @@ interface CommentShape extends CommentReplyShape {
   };
 }
 
+function toIsoStringValue(value: unknown): string {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+  return new Date().toISOString();
+}
+
 export class CommentAuthorDto {
   @ApiProperty({ description: '用户UUID' })
   uuid: string;
@@ -70,11 +83,11 @@ export class CommentReplyPreviewDto {
   author: CommentAuthorDto;
 
   @ApiProperty({ description: '创建时间 (ISO)' })
-  @Transform(({ value }) => new Date(value).toISOString())
+  @Transform(({ value }) => toIsoStringValue(value))
   created_at: string;
 
   @ApiProperty({ description: '更新时间 (ISO)' })
-  @Transform(({ value }) => new Date(value).toISOString())
+  @Transform(({ value }) => toIsoStringValue(value))
   updated_at: string;
 
   constructor(comment: CommentReplyShape) {

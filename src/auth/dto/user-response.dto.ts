@@ -3,6 +3,29 @@ import { UserRole, UserStatus } from '@prisma/client';
 
 const DEFAULT_AVATAR_URL = '/api/upload/file/avatars/default.webp';
 
+type UserResponseInput = {
+  id: number;
+  uuid: string;
+  username: string;
+  email: string;
+  nickname?: string | null;
+  avatar_url?: string | null;
+  phoneNumber?: string | null;
+  role: UserRole;
+  status: UserStatus;
+  created_at: Date;
+  updated_at: Date;
+};
+
+type PublicUserResponseInput = {
+  uuid: string;
+  username: string;
+  nickname?: string | null;
+  avatar_url?: string | null;
+  role: UserRole;
+  created_at: Date;
+};
+
 const normalizeAvatarUrl = (avatarUrl?: string | null) => {
   if (!avatarUrl || avatarUrl === DEFAULT_AVATAR_URL) {
     return undefined;
@@ -44,14 +67,14 @@ export class UserResponseDto {
   @ApiProperty({ description: '更新时间' })
   updated_at: Date;
 
-  constructor(user: any) {
+  constructor(user: UserResponseInput) {
     this.id = user.id;
     this.uuid = user.uuid;
     this.username = user.username;
     this.email = user.email;
-    this.nickname = user.nickname;
+    this.nickname = user.nickname ?? undefined;
     this.avatar_url = normalizeAvatarUrl(user.avatar_url);
-    this.phoneNumber = user.phoneNumber;
+    this.phoneNumber = user.phoneNumber ?? undefined;
     this.role = user.role;
     this.status = user.status;
     this.created_at = user.created_at;
@@ -78,10 +101,10 @@ export class PublicUserResponseDto {
   @ApiProperty({ description: '创建时间' })
   created_at: Date;
 
-  constructor(user: any) {
+  constructor(user: PublicUserResponseInput) {
     this.uuid = user.uuid;
     this.username = user.username;
-    this.nickname = user.nickname;
+    this.nickname = user.nickname ?? undefined;
     this.avatar_url = normalizeAvatarUrl(user.avatar_url);
     this.role = user.role;
     this.created_at = user.created_at;

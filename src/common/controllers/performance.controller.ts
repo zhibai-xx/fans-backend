@@ -13,6 +13,9 @@ import {
 } from '../../database/database-performance.service';
 import { ResponseOptimizationInterceptor } from '../interceptors/response-optimization.interceptor';
 
+type QueryStats = ReturnType<DatabasePerformanceService['getQueryStats']>;
+type CacheStats = ReturnType<ResponseOptimizationInterceptor['getCacheStats']>;
+
 @ApiTags('性能监控')
 @Controller('performance')
 @UseGuards(JwtAuthGuard)
@@ -44,7 +47,8 @@ export class PerformanceController {
         timestamp: new Date(),
       };
     } catch (error) {
-      this.logger.error('获取数据库性能报告失败:', error);
+      const { message, stack } = this.getErrorInfo(error);
+      this.logger.error(`获取数据库性能报告失败: ${message}`, stack);
       throw error;
     }
   }
@@ -65,7 +69,8 @@ export class PerformanceController {
         timestamp: new Date(),
       };
     } catch (error) {
-      this.logger.error('获取数据库优化建议失败:', error);
+      const { message, stack } = this.getErrorInfo(error);
+      this.logger.error(`获取数据库优化建议失败: ${message}`, stack);
       throw error;
     }
   }
@@ -97,7 +102,8 @@ export class PerformanceController {
         timestamp: new Date(),
       };
     } catch (error) {
-      this.logger.error('获取查询统计信息失败:', error);
+      const { message, stack } = this.getErrorInfo(error);
+      this.logger.error(`获取查询统计信息失败: ${message}`, stack);
       throw error;
     }
   }
@@ -117,7 +123,8 @@ export class PerformanceController {
         timestamp: new Date(),
       };
     } catch (error) {
-      this.logger.error('获取缓存统计信息失败:', error);
+      const { message, stack } = this.getErrorInfo(error);
+      this.logger.error(`获取缓存统计信息失败: ${message}`, stack);
       throw error;
     }
   }
@@ -137,7 +144,8 @@ export class PerformanceController {
         timestamp: new Date(),
       };
     } catch (error) {
-      this.logger.error('清空缓存失败:', error);
+      const { message, stack } = this.getErrorInfo(error);
+      this.logger.error(`清空缓存失败: ${message}`, stack);
       throw error;
     }
   }
@@ -157,7 +165,8 @@ export class PerformanceController {
         timestamp: new Date(),
       };
     } catch (error) {
-      this.logger.error('清空性能指标历史失败:', error);
+      const { message, stack } = this.getErrorInfo(error);
+      this.logger.error(`清空性能指标历史失败: ${message}`, stack);
       throw error;
     }
   }
@@ -206,7 +215,8 @@ export class PerformanceController {
         timestamp: new Date(),
       };
     } catch (error) {
-      this.logger.error('获取系统性能概览失败:', error);
+      const { message, stack } = this.getErrorInfo(error);
+      this.logger.error(`获取系统性能概览失败: ${message}`, stack);
       throw error;
     }
   }
@@ -214,7 +224,10 @@ export class PerformanceController {
   /**
    * 计算性能评分
    */
-  private calculatePerformanceScore(dbReport: any, queryStats: any): number {
+  private calculatePerformanceScore(
+    dbReport: PerformanceReport,
+    queryStats: QueryStats,
+  ): number {
     let score = 100;
 
     // 根据平均查询时间扣分
@@ -242,8 +255,15 @@ export class PerformanceController {
   /**
    * 计算缓存命中率
    */
-  private calculateCacheHitRate(cacheStats: any): number {
+  private calculateCacheHitRate(cacheStats: CacheStats): number {
     // 这里简化处理，实际应该跟踪命中和未命中次数
     return cacheStats.size > 0 ? 85 : 0;
+  }
+
+  private getErrorInfo(error: unknown): { message: string; stack?: string } {
+    if (error instanceof Error) {
+      return { message: error.message, stack: error.stack };
+    }
+    return { message: '未知错误' };
   }
 }

@@ -9,20 +9,13 @@ import {
   Query,
   Request,
   UseGuards,
-  HttpCode,
-  HttpStatus,
   ParseIntPipe,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { AdminRoleGuard } from '../../auth/guards/admin-role.guard';
 import { MediaService } from '../media.service';
 import { MediaType, MediaStatus } from '@prisma/client';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import {
   EnhancedDeleteDto,
   CleanupRecycleBinDto,
@@ -33,7 +26,7 @@ interface MediaFilters {
   status?: MediaStatus;
   media_type?: MediaType;
   category_id?: string;
-  date_range?: string;
+  date_range?: 'today' | 'week' | 'month';
   search?: string;
   user_id?: number;
 }
@@ -49,12 +42,28 @@ interface BatchDeleteDto {
   cleanupDelayDays?: number;
 }
 
+type AdminRequest = {
+  user: {
+    id: number;
+  };
+};
+
 @ApiTags('管理员-媒体管理')
 @Controller('admin/media')
 @UseGuards(JwtAuthGuard, AdminRoleGuard)
 @ApiBearerAuth()
 export class AdminMediaController {
   constructor(private readonly mediaService: MediaService) {}
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    if (typeof error === 'string') {
+      return error;
+    }
+    return '未知错误';
+  }
 
   /**
    * 获取所有媒体内容（管理员专用）
@@ -73,12 +82,13 @@ export class AdminMediaController {
     @Query('user_id', new ParseIntPipe({ optional: true })) user_id?: number,
   ) {
     try {
+      const normalizedDateRange = this.normalizeDateRange(date_range);
       const filters: MediaFilters = {
         visibility,
         status,
         media_type,
         category_id,
-        date_range,
+        date_range: normalizedDateRange,
         search,
         user_id,
       };
@@ -102,9 +112,18 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
+  }
+
+  private normalizeDateRange(
+    value?: string,
+  ): 'today' | 'week' | 'month' | undefined {
+    if (value === 'today' || value === 'week' || value === 'month') {
+      return value;
+    }
+    return undefined;
   }
 
   /**
@@ -122,7 +141,7 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
   }
@@ -142,7 +161,7 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
   }
@@ -168,7 +187,7 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
   }
@@ -191,7 +210,7 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
   }
@@ -224,7 +243,7 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
   }
@@ -235,7 +254,7 @@ export class AdminMediaController {
   @Delete(':id')
   @ApiOperation({ summary: '删除单个媒体' })
   async deleteMedia(
-    @Request() req,
+    @Request() req: AdminRequest,
     @Param('id') id: string,
     @Query('reason') reason?: string,
     @Query('cleanupDelayDays', new ParseIntPipe({ optional: true }))
@@ -257,7 +276,7 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
   }
@@ -267,7 +286,10 @@ export class AdminMediaController {
    */
   @Delete('batch')
   @ApiOperation({ summary: '批量删除媒体' })
-  async batchDeleteMedia(@Request() req, @Body() body: BatchDeleteDto) {
+  async batchDeleteMedia(
+    @Request() req: AdminRequest,
+    @Body() body: BatchDeleteDto,
+  ) {
     try {
       const adminId = req.user.id;
       const result = await this.mediaService.batchDeleteMedia(
@@ -282,7 +304,7 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
   }
@@ -292,7 +314,10 @@ export class AdminMediaController {
    */
   @Post('batch/delete')
   @ApiOperation({ summary: '批量删除媒体 (POST方式)' })
-  async batchDeleteMediaPost(@Request() req, @Body() body: BatchDeleteDto) {
+  async batchDeleteMediaPost(
+    @Request() req: AdminRequest,
+    @Body() body: BatchDeleteDto,
+  ) {
     try {
       const adminId = req.user.id;
       const result = await this.mediaService.batchDeleteMedia(
@@ -307,7 +332,7 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
   }
@@ -333,14 +358,17 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
   }
 
   @Post('recycle/restore')
   @ApiOperation({ summary: '恢复回收站媒体' })
-  async restoreMedia(@Request() req, @Body() body: BatchDeleteDto) {
+  async restoreMedia(
+    @Request() req: AdminRequest,
+    @Body() body: BatchDeleteDto,
+  ) {
     try {
       const adminId = req.user.id;
       const result = await this.mediaService.restoreMedia(
@@ -354,7 +382,7 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
   }
@@ -364,7 +392,10 @@ export class AdminMediaController {
    */
   @Post('recycle/hard-delete')
   @ApiOperation({ summary: '彻底删除回收站媒体' })
-  async hardDeleteMedia(@Request() req, @Body() body: EnhancedDeleteDto) {
+  async hardDeleteMedia(
+    @Request() req: AdminRequest,
+    @Body() body: EnhancedDeleteDto,
+  ) {
     try {
       const adminId = req.user.id;
       const result = await this.mediaService.hardDeleteMedia(
@@ -383,7 +414,7 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
   }
@@ -393,7 +424,10 @@ export class AdminMediaController {
    */
   @Post('recycle/cleanup')
   @ApiOperation({ summary: '执行回收站清理任务' })
-  async cleanupRecycleBin(@Request() req, @Body() body: CleanupRecycleBinDto) {
+  async cleanupRecycleBin(
+    @Request() req: AdminRequest,
+    @Body() body: CleanupRecycleBinDto,
+  ) {
     try {
       const adminId = req.user.id;
       const result = await this.mediaService.cleanupRecycleBin({
@@ -410,7 +444,7 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
   }
@@ -436,7 +470,7 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
   }
@@ -446,10 +480,7 @@ export class AdminMediaController {
    */
   @Get('users/stats')
   @ApiOperation({ summary: '获取用户上传统计' })
-  async getUserUploadStats(
-    @Query('page', new ParseIntPipe({ optional: true })) page: number = 1,
-    @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 20,
-  ) {
+  async getUserUploadStats() {
     try {
       const result = await this.mediaService.getAllUserUploadStats();
       return {
@@ -459,7 +490,7 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
   }
@@ -479,7 +510,7 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
   }
@@ -499,7 +530,7 @@ export class AdminMediaController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error),
       };
     }
   }

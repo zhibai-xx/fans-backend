@@ -8,6 +8,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Response } from 'express';
 import { DatabaseService } from 'src/database/database.service';
 import { MediaService } from '../media/media.service';
 import { StorageFactoryService } from './services/storage-factory.service';
@@ -53,15 +54,105 @@ const PERFORMANCE_CONFIG = {
   CLEANUP_INTERVAL: 60 * 1000, // 1分钟清理间隔
 };
 
+type UploadMetadata = {
+  title?: string;
+  description?: string;
+  tagIds?: string[];
+  tagNames?: string[];
+  categoryId?: string;
+  source?: MediaSource;
+  sourceMetadata?: Record<string, unknown>;
+  source_metadata?: Record<string, unknown>;
+};
+
+type SystemIngestFileType = 'image' | 'gif' | 'video';
+
+type SystemIngestFileInfo = {
+  size: number;
+  type: SystemIngestFileType;
+  lastModified: Date;
+  dimensions?: {
+    width: number;
+    height: number;
+  };
+};
+
+type SystemIngestFile = {
+  id: string;
+  name: string;
+  path: string;
+  size: number;
+  type: SystemIngestFileType;
+  lastModified: string;
+  dimensions?: SystemIngestFileInfo['dimensions'];
+};
+
+type SystemIngestUser = {
+  userId: string;
+  userName: string;
+  totalFiles: number;
+  files: SystemIngestFile[];
+};
+
+type SystemIngestScanResult = {
+  users: SystemIngestUser[];
+  totalFiles: number;
+  totalSize: number;
+};
+
+type SystemIngestFileSelection =
+  | string
+  | { path: string; name?: string; userId?: string };
+
+type SystemIngestBatchResultItem = {
+  filePath?: string;
+  fileName?: string;
+  uploadId?: string;
+  success: boolean;
+  needUpload?: boolean;
+  mediaId?: string;
+  error?: string;
+};
+
+type SystemIngestUploadRequest = {
+  filename: string;
+  fileSize: number;
+  fileType: FileType;
+  fileMd5: string;
+  title: string;
+  description: string;
+  tagIds: string[];
+  ingestUserId?: string | null;
+  originalCreatedAt?: Date | null;
+  sourceMetadata?: Record<string, unknown>;
+};
+
+type SystemIngestUploadInitResult = {
+  uploadId: string;
+  needUpload: boolean;
+  mediaId?: string;
+  chunkSize?: number;
+  totalChunks?: number;
+};
+
+type SystemIngestParseResult = {
+  ingestUserId: string | null;
+  originalCreatedAt: Date | null;
+  sourceMetadata: Record<string, unknown>;
+  title: string;
+  description: string;
+};
+
 @Injectable()
 export class UploadService {
   private readonly logger = new Logger(UploadService.name);
   private readonly uploadDir: string;
   private readonly tempDir: string;
   private readonly chunkDir: string;
+  private readonly enableVideoFeature: boolean;
   private readonly systemIngestFileCache = new Map<
     string,
-    { path: string; name: string; type: string }
+    { path: string; name: string; type: SystemIngestFileType }
   >();
 
   // 性能优化相关
@@ -69,7 +160,7 @@ export class UploadService {
     string,
     { md5: string; timestamp: number }
   >();
-  private readonly uploadQueue = new Map<string, Promise<any>>();
+  private readonly uploadQueue = new Map<string, Promise<void>>();
   private readonly activeUploads = new Set<string>();
   private cleanupTimer: NodeJS.Timeout | null = null;
 
@@ -84,12 +175,20 @@ export class UploadService {
     this.uploadDir = this.configService.get<string>('UPLOAD_DIR') || 'uploads';
     this.tempDir = path.join(this.uploadDir, 'temp');
     this.chunkDir = path.join(this.uploadDir, 'chunks');
+    this.enableVideoFeature =
+      this.configService.get<string>('ENABLE_VIDEO_FEATURE') === 'true';
 
     // 确保目录存在
-    this.ensureDirectories();
+    void this.ensureDirectories();
 
     // 启动清理定时器
     this.startCleanupTimer();
+  }
+
+  private ensureVideoFeatureEnabled(context: string): void {
+    if (!this.enableVideoFeature) {
+      throw new BadRequestException(`${context}已关闭，当前阶段仅开放图片功能`);
+    }
   }
 
   /**
@@ -115,8 +214,84 @@ export class UploadService {
     }
 
     this.cleanupTimer = setInterval(() => {
-      this.cleanupExpiredData();
+      void this.cleanupExpiredData();
     }, PERFORMANCE_CONFIG.CLEANUP_INTERVAL);
+  }
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    if (typeof error === 'string') {
+      return error;
+    }
+    return '未知错误';
+  }
+
+  private normalizeStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.filter((item): item is string => typeof item === 'string');
+  }
+
+  private normalizeRecord(value: unknown): Record<string, unknown> | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+    return value as Record<string, unknown>;
+  }
+
+  private normalizeMediaSource(value: unknown): MediaSource | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const sources = Object.values(MediaSource) as string[];
+    return sources.includes(value) ? (value as MediaSource) : undefined;
+  }
+
+  private parseUploadMetadata(value: unknown): UploadMetadata {
+    const record = this.normalizeRecord(value);
+    if (!record) {
+      return {};
+    }
+    return {
+      title: typeof record.title === 'string' ? record.title : undefined,
+      description:
+        typeof record.description === 'string' ? record.description : undefined,
+      tagIds: this.normalizeStringArray(record.tagIds),
+      tagNames: this.normalizeStringArray(record.tagNames),
+      categoryId:
+        typeof record.categoryId === 'string' ? record.categoryId : undefined,
+      source: this.normalizeMediaSource(record.source),
+      sourceMetadata: this.normalizeRecord(record.sourceMetadata),
+      source_metadata: this.normalizeRecord(record.source_metadata),
+    };
+  }
+
+  private mergeSourceMetadata(
+    metadata: UploadMetadata,
+  ): Prisma.JsonObject | undefined {
+    const merged = {
+      ...(metadata.sourceMetadata ?? {}),
+      ...(metadata.source_metadata ?? {}),
+    };
+    return Object.keys(merged).length > 0
+      ? (merged as Prisma.JsonObject)
+      : undefined;
+  }
+
+  private async verifyInstantUploadFile(fileUrl: string): Promise<void> {
+    try {
+      const fileExists = await fs.pathExists(fileUrl);
+      if (!fileExists) {
+        this.logger.warn(`秒传文件不存在: ${fileUrl}`);
+      }
+    } catch (error) {
+      this.logger.error(
+        `检查秒传文件存在性失败: ${this.getErrorMessage(error)}`,
+      );
+    }
   }
 
   /**
@@ -227,13 +402,17 @@ export class UploadService {
     );
     const uploadSource = this.resolveUserUploadSource(userRole);
 
+    if (dto.fileType === FileType.VIDEO) {
+      this.ensureVideoFeatureEnabled('视频上传');
+    }
+
     // 检查并发限制
     if (this.activeUploads.size >= PERFORMANCE_CONFIG.MAX_CONCURRENT_UPLOADS) {
       throw new BadRequestException('当前上传任务过多，请稍后再试');
     }
 
     // 检查是否可以秒传
-    const existingMedia = await this.checkInstantUpload(dto.fileMd5, userId);
+    const existingMedia = await this.checkInstantUpload(dto.fileMd5);
     if (existingMedia) {
       this.logger.log(`文件已存在，执行秒传: ${existingMedia.id}`);
 
@@ -355,7 +534,7 @@ export class UploadService {
   /**
    * 检查是否可以秒传 - 优化版本
    */
-  private async checkInstantUpload(fileMd5: string, userId: number) {
+  private async checkInstantUpload(fileMd5: string) {
     // 使用索引优化的查询
     const completedUpload = await this.prisma.upload.findFirst({
       where: {
@@ -378,16 +557,8 @@ export class UploadService {
       const media = completedUpload.media;
 
       // 异步检查文件是否存在，不阻塞主流程
-      setImmediate(async () => {
-        try {
-          const fileExists = await fs.pathExists(media.url);
-          if (!fileExists) {
-            this.logger.warn(`秒传文件不存在: ${media.url}`);
-            // 可以考虑清理无效记录
-          }
-        } catch (error) {
-          this.logger.error('检查秒传文件存在性失败:', error);
-        }
+      setImmediate(() => {
+        void this.verifyInstantUploadFile(media.url);
       });
 
       return media;
@@ -441,7 +612,7 @@ export class UploadService {
     try {
       await fs.move(file.path, chunkPath, { overwrite: true });
     } catch (error) {
-      this.logger.error(`保存分片失败: ${error.message}`);
+      this.logger.error(`保存分片失败: ${this.getErrorMessage(error)}`);
       throw new InternalServerErrorException('保存分片失败');
     }
 
@@ -488,6 +659,10 @@ export class UploadService {
       throw new NotFoundException('上传记录不存在');
     }
 
+    if (this.resolveStoredFileType(upload.file_type) === FileType.VIDEO) {
+      this.ensureVideoFeatureEnabled('视频上传');
+    }
+
     // 检查所有分片是否已上传
     const uploadedChunks = upload.uploaded_chunks as number[];
     if (uploadedChunks.length !== upload.total_chunks) {
@@ -527,25 +702,26 @@ export class UploadService {
       }
 
       // 创建媒体记录
-      const metadata = upload.metadata as any;
+      const metadata = this.parseUploadMetadata(upload.metadata);
       const resolvedSource = this.resolveMetadataSource(metadata);
-      const sourceMetadata: Record<string, any> = {
-        ...(metadata?.sourceMetadata ?? {}),
-        ...(metadata?.source_metadata ?? {}),
-      };
+      const sourceMetadataValue: Prisma.JsonObject =
+        this.mergeSourceMetadata(metadata) ?? {};
       const lowerExt = ext.toLowerCase();
+      const resolvedFileType = this.resolveStoredFileType(upload.file_type);
 
-      if (upload.file_type === FileType.VIDEO && lowerExt === '.mov') {
-        sourceMetadata.original_file_url = finalPath;
-        sourceMetadata.original_file_format = 'mov';
+      if (resolvedFileType === FileType.VIDEO && lowerExt === '.mov') {
+        sourceMetadataValue.original_file_url = finalPath;
+        sourceMetadataValue.original_file_format = 'mov';
       }
+      const resolvedSourceMetadata =
+        Object.keys(sourceMetadataValue).length > 0
+          ? sourceMetadataValue
+          : undefined;
 
       // 处理标签：将标签名称转换为标签ID
       let tagIds: string[] = [];
-      const rawTagNames = Array.isArray(metadata.tagNames)
-        ? metadata.tagNames
-        : [];
-      const rawTagIds = Array.isArray(metadata.tagIds) ? metadata.tagIds : [];
+      const rawTagNames = metadata.tagNames ?? [];
+      const rawTagIds = metadata.tagIds ?? [];
       if (rawTagNames.length > 0 || rawTagIds.length > 0) {
         tagIds = await this.resolveUploadTagIds({
           tagNames: rawTagNames,
@@ -558,33 +734,35 @@ export class UploadService {
       // 提取图片尺寸信息
       let width: number | undefined;
       let height: number | undefined;
-      if (upload.file_type === FileType.IMAGE) {
+      if (resolvedFileType === FileType.IMAGE) {
         try {
           const imageMetadata = await sharp(finalPath).metadata();
           width = imageMetadata.width;
           height = imageMetadata.height;
         } catch (error) {
-          this.logger.warn(`提取图片尺寸信息失败: ${error.message}`);
+          this.logger.warn(
+            `提取图片尺寸信息失败: ${this.getErrorMessage(error)}`,
+          );
         }
       }
 
+      const mediaTitle = metadata.title ?? upload.filename;
       const media = await this.mediaService.create({
-        title: metadata.title,
+        title: mediaTitle,
         description: metadata.description,
         url: finalPath,
         size: Number(upload.file_size),
         width,
         height,
         media_type:
-          upload.file_type === FileType.IMAGE
+          resolvedFileType === FileType.IMAGE
             ? MediaType.IMAGE
             : MediaType.VIDEO,
         user_id: userId,
         category_id: metadata.categoryId,
         tag_ids: tagIds,
         source: resolvedSource,
-        source_metadata:
-          Object.keys(sourceMetadata).length > 0 ? sourceMetadata : undefined,
+        source_metadata: resolvedSourceMetadata,
       });
 
       if (!media) {
@@ -727,7 +905,7 @@ export class UploadService {
         results.push(result);
       } catch (error) {
         this.logger.error(
-          `批量上传初始化失败: ${file.filename}, ${error.message}`,
+          `批量上传初始化失败: ${file.filename}, ${this.getErrorMessage(error)}`,
         );
         // 继续处理其他文件
       }
@@ -883,15 +1061,17 @@ export class UploadService {
       : MediaSource.USER_UPLOAD;
   }
 
-  private resolveMetadataSource(metadata?: Record<string, any>): MediaSource {
-    const candidate = metadata?.source;
-    if (
-      typeof candidate === 'string' &&
-      (Object.values(MediaSource) as string[]).includes(candidate)
-    ) {
-      return candidate as MediaSource;
+  private resolveMetadataSource(metadata?: UploadMetadata): MediaSource {
+    return metadata?.source ?? MediaSource.USER_UPLOAD;
+  }
+
+  private resolveStoredFileType(value: string): FileType {
+    const isValidType = (Object.values(FileType) as string[]).includes(value);
+    if (isValidType) {
+      return value as FileType;
     }
-    return MediaSource.USER_UPLOAD;
+    this.logger.warn(`未知文件类型，默认按视频处理: ${value}`);
+    return FileType.VIDEO;
   }
 
   /**
@@ -919,7 +1099,9 @@ export class UploadService {
           data: { status: UploadStatus.EXPIRED },
         });
       } catch (error) {
-        this.logger.error(`清理过期上传失败: ${upload.id}, ${error.message}`);
+        this.logger.error(
+          `清理过期上传失败: ${upload.id}, ${this.getErrorMessage(error)}`,
+        );
       }
     }
 
@@ -929,7 +1111,9 @@ export class UploadService {
   /**
    * 扫描系统导入目录
    */
-  async scanSystemIngestDirectory(customPath?: string): Promise<any> {
+  async scanSystemIngestDirectory(
+    customPath?: string,
+  ): Promise<SystemIngestScanResult> {
     this.logger.log('开始扫描系统导入目录...');
 
     // 使用用户指定的路径或默认路径
@@ -942,10 +1126,17 @@ export class UploadService {
     }
 
     if (!(await fs.pathExists(systemIngestBasePath))) {
-      throw new Error(`系统导入目录不存在: ${systemIngestBasePath}`);
+      if (!customPath) {
+        await fs.ensureDir(systemIngestBasePath);
+        this.logger.log(
+          `系统导入默认目录不存在，已自动创建: ${systemIngestBasePath}`,
+        );
+      } else {
+        throw new Error(`系统导入目录不存在: ${systemIngestBasePath}`);
+      }
     }
 
-    const users: any[] = [];
+    const users: SystemIngestUser[] = [];
     let totalFiles = 0;
     let totalSize = 0;
 
@@ -969,10 +1160,7 @@ export class UploadService {
             });
 
             totalFiles += userFiles.length;
-            totalSize += userFiles.reduce(
-              (sum: number, file: any) => sum + file.size,
-              0,
-            );
+            totalSize += userFiles.reduce((sum, file) => sum + file.size, 0);
           }
         }
       }
@@ -987,7 +1175,7 @@ export class UploadService {
         totalSize,
       };
     } catch (error) {
-      this.logger.error('扫描系统导入目录失败:', error);
+      this.logger.error(`扫描系统导入目录失败: ${this.getErrorMessage(error)}`);
       throw error;
     }
   }
@@ -998,8 +1186,8 @@ export class UploadService {
   private async scanUserDirectory(
     userPath: string,
     userId: string,
-  ): Promise<any[]> {
-    const files: any[] = [];
+  ): Promise<SystemIngestFile[]> {
+    const files: SystemIngestFile[] = [];
 
     try {
       const entries = await fs.readdir(userPath, { withFileTypes: true });
@@ -1039,7 +1227,9 @@ export class UploadService {
         }
       }
     } catch (error) {
-      this.logger.error(`扫描用户目录 ${userId} 失败:`, error);
+      this.logger.error(
+        `扫描用户目录 ${userId} 失败: ${this.getErrorMessage(error)}`,
+      );
     }
 
     return files;
@@ -1051,12 +1241,12 @@ export class UploadService {
   private async getSystemIngestFileInfo(
     filePath: string,
     fileName: string,
-  ): Promise<any> {
+  ): Promise<SystemIngestFileInfo | null> {
     try {
       const stat = await fs.stat(filePath);
       const ext = path.extname(fileName).toLowerCase();
 
-      let type: string;
+      let type: SystemIngestFileType;
       if (['.jpg', '.jpeg', '.png', '.webp', '.bmp'].includes(ext)) {
         type = 'image';
       } else if (['.gif'].includes(ext)) {
@@ -1073,7 +1263,9 @@ export class UploadService {
         lastModified: stat.mtime,
       };
     } catch (error) {
-      this.logger.error(`获取文件信息失败 ${fileName}:`, error);
+      this.logger.error(
+        `获取文件信息失败 ${fileName}: ${this.getErrorMessage(error)}`,
+      );
       return null;
     }
   }
@@ -1082,14 +1274,12 @@ export class UploadService {
    * 批量上传系统导入文件
    */
   async batchUploadSystemIngestFiles(
-    selectedFiles: Array<
-      string | { path: string; name?: string; userId?: string }
-    >,
+    selectedFiles: SystemIngestFileSelection[],
     userId: number,
-  ): Promise<any> {
+  ): Promise<SystemIngestBatchResultItem[]> {
     this.logger.log(`开始批量上传 ${selectedFiles.length} 个文件`);
 
-    const results: any[] = [];
+    const results: SystemIngestBatchResultItem[] = [];
 
     for (const fileEntry of selectedFiles) {
       let filePath: string | undefined;
@@ -1107,6 +1297,16 @@ export class UploadService {
             filePath,
             success: false,
             error: '不支持的文件类型',
+          });
+          continue;
+        }
+
+        if (fileInfo.type === 'video' && !this.enableVideoFeature) {
+          results.push({
+            filePath,
+            fileName,
+            success: false,
+            error: '视频导入已关闭，当前阶段仅开放图片功能',
           });
           continue;
         }
@@ -1162,11 +1362,13 @@ export class UploadService {
           );
         }
       } catch (error) {
-        this.logger.error(`上传文件失败 ${filePath || '未知路径'}:`, error);
+        this.logger.error(
+          `上传文件失败 ${filePath || '未知路径'}: ${this.getErrorMessage(error)}`,
+        );
         results.push({
           filePath,
           success: false,
-          error: error.message,
+          error: this.getErrorMessage(error),
         });
       }
     }
@@ -1181,7 +1383,7 @@ export class UploadService {
     filePath: string,
     fileName: string,
     userHint?: string,
-  ): any {
+  ): SystemIngestParseResult {
     const pathParts = filePath.split(path.sep);
 
     // 识别可能的来源用户 ID（优先匹配纯数字目录）
@@ -1203,14 +1405,33 @@ export class UploadService {
       originalCreatedAt = new Date(`${year}-${month}-${day}`);
     }
 
-    // 判断媒体分类
+    // 根据真实目录命名判断媒体分类，兼容中文抓取目录。
+    const normalizedFilePath = filePath.toLowerCase();
+    const fileExtension = path.extname(fileName).toLowerCase();
+    const isVideoFile = ['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(
+      fileExtension,
+    );
+    const isImageFile = ['.jpg', '.jpeg', '.png', '.webp', '.bmp'].includes(
+      fileExtension,
+    );
+    const isGifFile = fileExtension === '.gif';
+
     let mediaCategory = 'general';
-    if (filePath.toLowerCase().includes('original')) {
+    if (
+      normalizedFilePath.includes('original') ||
+      filePath.includes('原创') ||
+      filePath.includes('原图')
+    ) {
       mediaCategory = 'original';
-    } else if (filePath.toLowerCase().includes('video')) {
-      mediaCategory = 'video';
-    } else if (filePath.toLowerCase().includes('live')) {
+    } else if (
+      normalizedFilePath.includes('live_photo') ||
+      normalizedFilePath.includes('live')
+    ) {
       mediaCategory = 'live';
+    } else if (normalizedFilePath.includes('video') || isVideoFile) {
+      mediaCategory = 'video';
+    } else if (isImageFile || isGifFile) {
+      mediaCategory = 'image';
     }
 
     const sourceMetadata = {
@@ -1238,15 +1459,88 @@ export class UploadService {
   /**
    * 初始化系统导入上传
    */
-  private async initSystemIngestUpload(dto: any, userId: number): Promise<any> {
+  private async initSystemIngestUpload(
+    dto: SystemIngestUploadRequest,
+    userId: number,
+  ): Promise<SystemIngestUploadInitResult> {
     try {
+      if (dto.fileType === FileType.VIDEO) {
+        this.ensureVideoFeatureEnabled('视频导入');
+      }
+
       // 检查是否已存在相同文件
-      const existingUpload = await this.checkInstantUpload(dto.fileMd5, userId);
-      if (existingUpload) {
-        return existingUpload;
+      const existingMedia = await this.checkInstantUpload(dto.fileMd5);
+      if (existingMedia) {
+        const existingUploadRecord = await this.prisma.upload.findFirst({
+          where: {
+            file_md5: dto.fileMd5,
+            user_id: userId,
+            status: UploadStatus.COMPLETED,
+            media_id: existingMedia.id,
+          },
+        });
+
+        if (existingUploadRecord) {
+          return {
+            uploadId: existingUploadRecord.id,
+            needUpload: false,
+            mediaId: existingMedia.id,
+          };
+        }
+
+        const chunkSize = 5 * 1024 * 1024;
+        const totalChunks = Math.ceil(dto.fileSize / chunkSize);
+        const sourceMetadataValue = dto.sourceMetadata
+          ? (dto.sourceMetadata as Prisma.JsonObject)
+          : null;
+        const metadataPayload: Prisma.InputJsonValue = {
+          title: dto.title,
+          description: dto.description,
+          tagIds: dto.tagIds,
+          source: MediaSource.SYSTEM_INGEST,
+          originalCreatedAt: dto.originalCreatedAt ?? null,
+          sourceMetadata: sourceMetadataValue,
+          ingestUserId: dto.ingestUserId ?? null,
+        };
+
+        const upload = await this.prisma.upload.create({
+          data: {
+            filename: dto.filename,
+            file_size: dto.fileSize,
+            file_type: dto.fileType,
+            file_md5: dto.fileMd5,
+            chunk_size: chunkSize,
+            total_chunks: totalChunks,
+            uploaded_chunks: Array.from({ length: totalChunks }, (_, i) => i),
+            status: UploadStatus.COMPLETED,
+            metadata: metadataPayload,
+            final_path: existingMedia.url,
+            media_id: existingMedia.id,
+            user_id: userId,
+          },
+        });
+
+        return {
+          uploadId: upload.id,
+          needUpload: false,
+          mediaId: existingMedia.id,
+        };
       }
 
       // 创建上传记录
+      const sourceMetadataValue = dto.sourceMetadata
+        ? (dto.sourceMetadata as Prisma.JsonObject)
+        : null;
+      const metadataPayload: Prisma.InputJsonValue = {
+        title: dto.title,
+        description: dto.description,
+        tagIds: dto.tagIds,
+        source: MediaSource.SYSTEM_INGEST,
+        originalCreatedAt: dto.originalCreatedAt ?? null,
+        sourceMetadata: sourceMetadataValue,
+        ingestUserId: dto.ingestUserId ?? null,
+      };
+
       const upload = await this.prisma.upload.create({
         data: {
           filename: dto.filename,
@@ -1257,14 +1551,7 @@ export class UploadService {
           total_chunks: Math.ceil(dto.fileSize / (5 * 1024 * 1024)),
           uploaded_chunks: [],
           status: UploadStatus.PENDING,
-          metadata: {
-            title: dto.title,
-            description: dto.description,
-            tagIds: dto.tagIds,
-            source: MediaSource.SYSTEM_INGEST,
-            originalCreatedAt: dto.originalCreatedAt,
-            sourceMetadata: dto.sourceMetadata,
-          },
+          metadata: metadataPayload,
           user_id: userId,
         },
       });
@@ -1276,7 +1563,9 @@ export class UploadService {
         totalChunks: upload.total_chunks,
       };
     } catch (error) {
-      this.logger.error('初始化系统导入上传失败:', error);
+      this.logger.error(
+        `初始化系统导入上传失败: ${this.getErrorMessage(error)}`,
+      );
       throw error;
     }
   }
@@ -1331,7 +1620,7 @@ export class UploadService {
   async previewSystemIngestFile(
     fileId: string,
     userId: number,
-    res: any,
+    res: Response,
   ): Promise<void> {
     try {
       // 验证fileId格式
@@ -1340,10 +1629,7 @@ export class UploadService {
       }
 
       // 从临时存储中获取文件信息
-      const fileInfo = await this.getSystemIngestFileInfoForPreview(
-        fileId,
-        userId,
-      );
+      const fileInfo = await this.getSystemIngestFileInfoForPreview(fileId);
       if (!fileInfo) {
         throw new Error('文件不存在或无权访问');
       }
@@ -1394,7 +1680,6 @@ export class UploadService {
    */
   private async getSystemIngestFileInfoForPreview(
     fileId: string,
-    userId: number,
   ): Promise<{ path: string; name: string } | null> {
     try {
       // 从内存缓存或数据库中获取文件信息
@@ -1429,7 +1714,7 @@ export class UploadService {
    * 获取文件的MIME类型
    */
   private getContentType(ext: string): string {
-    const mimeTypes = {
+    const mimeTypes: Record<string, string> = {
       '.jpg': 'image/jpeg',
       '.jpeg': 'image/jpeg',
       '.png': 'image/png',
@@ -1443,6 +1728,6 @@ export class UploadService {
       '.mkv': 'video/x-matroska',
     };
 
-    return mimeTypes[ext] || 'application/octet-stream';
+    return mimeTypes[ext] ?? 'application/octet-stream';
   }
 }

@@ -11,7 +11,6 @@ import * as path from 'path';
 import * as fs from 'fs-extra';
 import {
   getProcessedMediaDir,
-  PROCESSED_ROOT,
   LEGACY_PROCESSED_ROOT,
 } from '../../common/utils/storage-path.util';
 
@@ -68,6 +67,23 @@ export enum ProcessingStatus {
   FAILED = 'FAILED',
 }
 
+type JobStatusResponse = {
+  id: string;
+  status: string;
+  progress: number;
+  data: VideoProcessingJob;
+  result: VideoProcessingResult | null;
+  error?: string;
+  createdAt: Date;
+  processedAt?: Date | null;
+  finishedAt?: Date | null;
+};
+
+const isJsonObject = (
+  value: Prisma.JsonValue | null | undefined,
+): value is Prisma.JsonObject =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
 /**
  * 视频处理主服务
  * 协调FFmpeg、HLS、缩略图生成等服务，提供完整的视频处理流程
@@ -77,12 +93,31 @@ export class VideoProcessingService {
   private readonly logger = new MyLoggerService(VideoProcessingService.name);
 
   constructor(
-    @InjectQueue('video-processing') private videoQueue: Queue,
+    @InjectQueue('video-processing')
+    private videoQueue: Queue<
+      VideoProcessingJob,
+      VideoProcessingResult,
+      string
+    >,
     private databaseService: DatabaseService,
     private ffmpegService: FFmpegService,
     private hlsService: HlsService,
     private thumbnailService: ThumbnailService,
   ) {}
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    if (typeof error === 'string') {
+      return error;
+    }
+    return '未知错误';
+  }
+
+  private getErrorStack(error: unknown): string | undefined {
+    return error instanceof Error ? error.stack : undefined;
+  }
 
   /**
    * 提交视频处理任务
@@ -122,11 +157,14 @@ export class VideoProcessingService {
       );
       return queueJob.id?.toString() || 'unknown';
     } catch (error) {
-      this.logger.error(`提交处理任务失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `提交处理任务失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       await this.updateProcessingStatus(
         job.mediaId,
         ProcessingStatus.FAILED,
-        error.message,
+        this.getErrorMessage(error),
       );
       throw error;
     }
@@ -317,10 +355,8 @@ export class VideoProcessingService {
           await this.updateMediaRecord(job.mediaId, result);
         } catch (updateError) {
           this.logger.error(
-            `处理失败时写入元数据失败: ${job.mediaId}, ${
-              (updateError as Error).message
-            }`,
-            updateError instanceof Error ? updateError.stack : undefined,
+            `处理失败时写入元数据失败: ${job.mediaId}, ${this.getErrorMessage(updateError)}`,
+            this.getErrorStack(updateError),
           );
         }
       }
@@ -384,7 +420,10 @@ export class VideoProcessingService {
       this.logger.log(`生成 ${qualities.length} 个质量版本`);
       return qualities;
     } catch (error) {
-      this.logger.error(`生成多分辨率版本失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `生成多分辨率版本失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw error;
     }
   }
@@ -437,7 +476,10 @@ export class VideoProcessingService {
         })),
       };
     } catch (error) {
-      this.logger.error(`生成HLS流失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `生成HLS流失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw error;
     }
   }
@@ -589,7 +631,10 @@ export class VideoProcessingService {
         throw spriteError;
       }
     } catch (error) {
-      this.logger.error(`生成缩略图失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `生成缩略图失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw error;
     }
   }
@@ -612,9 +657,11 @@ export class VideoProcessingService {
         },
       });
 
-      const mergedSourceMetadata: Prisma.JsonObject = {
-        ...((existingMedia?.source_metadata as Prisma.JsonObject) ?? {}),
-      };
+      const mergedSourceMetadata: Prisma.JsonObject = isJsonObject(
+        existingMedia?.source_metadata,
+      )
+        ? { ...existingMedia.source_metadata }
+        : {};
 
       if (result.originalSourceUrl) {
         mergedSourceMetadata.original_file_url = result.originalSourceUrl;
@@ -666,7 +713,10 @@ export class VideoProcessingService {
 
       this.logger.log(`数据库记录更新完成: ${mediaId}`);
     } catch (error) {
-      this.logger.error(`更新数据库记录失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `更新数据库记录失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       throw error;
     }
   }
@@ -679,9 +729,11 @@ export class VideoProcessingService {
    */
   private async updateProcessingStatus(
     mediaId: string,
-    status: ProcessingStatus,
-    error?: string,
+    _status: ProcessingStatus,
+    _error?: string,
   ): Promise<void> {
+    void _status;
+    void _error;
     try {
       await this.databaseService.media.update({
         where: { id: mediaId },
@@ -691,7 +743,10 @@ export class VideoProcessingService {
         },
       });
     } catch (dbError) {
-      this.logger.error(`更新处理状态失败: ${dbError.message}`, dbError.stack);
+      this.logger.error(
+        `更新处理状态失败: ${this.getErrorMessage(dbError)}`,
+        this.getErrorStack(dbError),
+      );
     }
   }
 
@@ -700,30 +755,49 @@ export class VideoProcessingService {
    * @param jobId 任务ID
    * @returns 任务状态信息
    */
-  async getJobStatus(jobId: string): Promise<any> {
+  async getJobStatus(jobId: string): Promise<JobStatusResponse> {
     try {
       const job = await this.videoQueue.getJob(jobId);
       if (!job) {
-        return { status: 'not_found' };
+        return {
+          id: jobId,
+          status: 'not_found',
+          progress: 0,
+          data: {} as VideoProcessingJob,
+          result: null,
+          createdAt: new Date(),
+        };
       }
 
       const state = await job.getState();
-      const progress = job.progress;
+      const progress = typeof job.progress === 'number' ? job.progress : 0;
+      const resolvedId = job.id ? String(job.id) : jobId;
 
       return {
-        id: job.id,
+        id: resolvedId,
         status: state,
         progress,
         data: job.data,
-        result: job.returnvalue,
-        error: job.failedReason,
+        result: job.returnvalue ?? null,
+        error: job.failedReason || undefined,
         createdAt: new Date(job.timestamp),
         processedAt: job.processedOn ? new Date(job.processedOn) : null,
         finishedAt: job.finishedOn ? new Date(job.finishedOn) : null,
       };
     } catch (error) {
-      this.logger.error(`获取任务状态失败: ${error.message}`, error.stack);
-      return { status: 'error', error: error.message };
+      this.logger.error(
+        `获取任务状态失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
+      return {
+        id: jobId,
+        status: 'error',
+        progress: 0,
+        data: {} as VideoProcessingJob,
+        result: null,
+        error: this.getErrorMessage(error),
+        createdAt: new Date(),
+      };
     }
   }
 
@@ -742,7 +816,10 @@ export class VideoProcessingService {
       this.logger.log(`任务已取消: ${jobId}`);
       return true;
     } catch (error) {
-      this.logger.error(`取消任务失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `取消任务失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
       return false;
     }
   }
@@ -782,8 +859,8 @@ export class VideoProcessingService {
       }
     } catch (error) {
       this.logger.error(
-        `❌ 清理处理文件失败: ${mediaId}, ${error.message}`,
-        error.stack,
+        `❌ 清理处理文件失败: ${mediaId}, ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
       );
       throw error; // 重新抛出错误以便上层处理
     }

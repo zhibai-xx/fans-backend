@@ -52,7 +52,7 @@ export class AdminTagCategoryController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error, '获取标签失败'),
       };
     }
   }
@@ -80,7 +80,7 @@ export class AdminTagCategoryController {
     } catch (error) {
       return {
         success: false,
-        message: error.message || '创建标签失败',
+        message: this.getErrorMessage(error, '创建标签失败'),
       };
     }
   }
@@ -105,7 +105,7 @@ export class AdminTagCategoryController {
     } catch (error) {
       return {
         success: false,
-        message: error.message || '更新标签失败',
+        message: this.getErrorMessage(error, '更新标签失败'),
       };
     }
   }
@@ -128,7 +128,7 @@ export class AdminTagCategoryController {
     } catch (error) {
       return {
         success: false,
-        message: error.message || '批量删除标签失败',
+        message: this.getErrorMessage(error, '批量删除标签失败'),
       };
     }
   }
@@ -148,7 +148,7 @@ export class AdminTagCategoryController {
     } catch (error) {
       return {
         success: false,
-        message: error.message || '删除标签失败',
+        message: this.getErrorMessage(error, '删除标签失败'),
       };
     }
   }
@@ -172,7 +172,7 @@ export class AdminTagCategoryController {
     } catch (error) {
       return {
         success: false,
-        message: error.message || '更新标签状态失败',
+        message: this.getErrorMessage(error, '更新标签状态失败'),
       };
     }
   }
@@ -196,7 +196,7 @@ export class AdminTagCategoryController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error, '获取分类失败'),
       };
     }
   }
@@ -218,7 +218,7 @@ export class AdminTagCategoryController {
     } catch (error) {
       return {
         success: false,
-        message: error.message || '创建分类失败',
+        message: this.getErrorMessage(error, '创建分类失败'),
       };
     }
   }
@@ -244,7 +244,7 @@ export class AdminTagCategoryController {
     } catch (error) {
       return {
         success: false,
-        message: error.message || '更新分类失败',
+        message: this.getErrorMessage(error, '更新分类失败'),
       };
     }
   }
@@ -267,7 +267,7 @@ export class AdminTagCategoryController {
     } catch (error) {
       return {
         success: false,
-        message: error.message || '批量删除分类失败',
+        message: this.getErrorMessage(error, '批量删除分类失败'),
       };
     }
   }
@@ -287,7 +287,7 @@ export class AdminTagCategoryController {
     } catch (error) {
       return {
         success: false,
-        message: error.message || '删除分类失败',
+        message: this.getErrorMessage(error, '删除分类失败'),
       };
     }
   }
@@ -310,8 +310,15 @@ export class AdminTagCategoryController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: this.getErrorMessage(error, '获取统计信息失败'),
       };
     }
+  }
+
+  private getErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof Error && error.message) {
+      return error.message;
+    }
+    return fallback;
   }
 }

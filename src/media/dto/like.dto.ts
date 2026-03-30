@@ -22,6 +22,12 @@ export class CreateLikeDto {
 /**
  * 点赞记录响应DTO
  */
+type LikeRecord = {
+  id: string;
+  media_id: string;
+  created_at: Date | string;
+};
+
 export class LikeResponseDto {
   @ApiProperty({ description: '点赞记录ID' })
   id: string;
@@ -33,17 +39,28 @@ export class LikeResponseDto {
   user_uuid: string;
 
   @ApiProperty({ description: '点赞时间' })
-  @Transform(({ value }) =>
-    value ? new Date(value).toISOString() : new Date().toISOString(),
-  )
+  @Transform(({ value }) => toIsoStringValue(value))
   created_at: string;
 
-  constructor(like: any, userUuid: string) {
+  constructor(like: LikeRecord, userUuid: string) {
     this.id = like.id;
     this.media_id = like.media_id;
     this.user_uuid = userUuid;
-    this.created_at = like.created_at;
+    this.created_at = new Date(like.created_at).toISOString();
   }
+}
+
+function toIsoStringValue(value: unknown): string {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+  return new Date().toISOString();
 }
 
 /**

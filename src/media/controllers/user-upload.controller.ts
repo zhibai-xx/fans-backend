@@ -8,13 +8,23 @@ import {
   Body,
   Query,
   UseGuards,
-  Request,
+  Req,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Request as ExpressRequest } from 'express';
 import { MediaService } from '../media.service';
 import { UserUploadFiltersDto } from '../dto/user-upload-record.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+
+type RequestWithUser = ExpressRequest & { user: { id: number } };
+
+type UserMediaUpdatePayload = {
+  title?: string;
+  description?: string;
+  category_id?: string;
+  tag_ids?: string[];
+};
 
 @Controller('user-uploads')
 @UseGuards(JwtAuthGuard)
@@ -25,7 +35,7 @@ export class UserUploadController {
    * 获取当前用户的上传记录统计
    */
   @Get('stats')
-  async getUploadStats(@Request() req) {
+  async getUploadStats(@Req() req: RequestWithUser) {
     const userId = req.user.id;
     return this.mediaService.getUserUploadStats(userId);
   }
@@ -35,7 +45,7 @@ export class UserUploadController {
    */
   @Get()
   async getUploadRecords(
-    @Request() req,
+    @Req() req: RequestWithUser,
     @Query() filters: UserUploadFiltersDto,
   ) {
     const userId = req.user.id;
@@ -47,7 +57,7 @@ export class UserUploadController {
    */
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteMedia(@Request() req, @Param('id') mediaId: string) {
+  async deleteMedia(@Req() req: RequestWithUser, @Param('id') mediaId: string) {
     const userId = req.user.id;
     await this.mediaService.deleteUserMedia(userId, mediaId);
   }
@@ -57,15 +67,9 @@ export class UserUploadController {
    */
   @Patch(':id')
   async updateDraft(
-    @Request() req,
+    @Req() req: RequestWithUser,
     @Param('id') mediaId: string,
-    @Body()
-    updateData: {
-      title?: string;
-      description?: string;
-      category_id?: string;
-      tag_ids?: string[];
-    },
+    @Body() updateData: UserMediaUpdatePayload,
   ) {
     const userId = req.user.id;
     return this.mediaService.updateUserMediaDraft(userId, mediaId, updateData);
@@ -76,15 +80,9 @@ export class UserUploadController {
    */
   @Patch(':id/resubmit')
   async resubmitMedia(
-    @Request() req,
+    @Req() req: RequestWithUser,
     @Param('id') mediaId: string,
-    @Body()
-    updateData: {
-      title?: string;
-      description?: string;
-      category_id?: string;
-      tag_ids?: string[];
-    },
+    @Body() updateData: UserMediaUpdatePayload,
   ) {
     const userId = req.user.id;
     return this.mediaService.resubmitRejectedMedia(userId, mediaId, updateData);
@@ -94,7 +92,10 @@ export class UserUploadController {
    * 撤回待审核投稿
    */
   @Post(':id/withdraw')
-  async withdrawMedia(@Request() req, @Param('id') mediaId: string) {
+  async withdrawMedia(
+    @Req() req: RequestWithUser,
+    @Param('id') mediaId: string,
+  ) {
     const userId = req.user.id;
     return this.mediaService.withdrawUserMedia(userId, mediaId);
   }

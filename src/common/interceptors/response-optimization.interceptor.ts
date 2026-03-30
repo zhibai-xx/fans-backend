@@ -6,15 +6,15 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
-import { map, tap } from 'rxjs/operators';
-import { Response } from 'express';
+import { map, mergeMap } from 'rxjs/operators';
+import { Request, Response } from 'express';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
 
 const gzip = promisify(zlib.gzip);
 
 interface CacheEntry {
-  data: any;
+  data: unknown;
   timestamp: number;
   etag: string;
 }
@@ -26,8 +26,8 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存
   private readonly MAX_CACHE_SIZE = 1000; // 最大缓存条目数
 
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
-    const request = context.switchToHttp().getRequest();
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    const request = context.switchToHttp().getRequest<Request>();
     const response = context.switchToHttp().getResponse<Response>();
     const { method, url, headers } = request;
 
@@ -51,7 +51,8 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
 
       if (cached) {
         // 检查客户端缓存
-        if (headers['if-none-match'] === cached.etag) {
+        const ifNoneMatch = this.getHeaderValue(headers, 'if-none-match');
+        if (ifNoneMatch === cached.etag) {
           response.status(304).end();
           return new Observable((subscriber) => subscriber.complete());
         }
@@ -77,7 +78,7 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
         // 转换BigInt为字符串，解决JSON序列化问题
         return this.convertBigIntToString(data);
       }),
-      tap(async (data) => {
+      mergeMap(async (data) => {
         // 对GET请求的响应进行缓存，但排除实时数据API
         if (method === 'GET' && !shouldSkipCache && data) {
           const cacheKey = this.generateCacheKey(url, headers);
@@ -89,6 +90,7 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
 
         // 响应压缩
         await this.compressResponse(response, data);
+        return data;
       }),
     );
   }
@@ -96,16 +98,17 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
   /**
    * 生成缓存键
    */
-  private generateCacheKey(url: string, headers: any): string {
-    const userAgent = headers['user-agent'] || '';
-    const acceptLanguage = headers['accept-language'] || '';
+  private generateCacheKey(url: string, headers: Request['headers']): string {
+    const userAgent = this.getHeaderValue(headers, 'user-agent') ?? '';
+    const acceptLanguage =
+      this.getHeaderValue(headers, 'accept-language') ?? '';
     return `${url}:${userAgent}:${acceptLanguage}`;
   }
 
   /**
    * 转换BigInt为字符串，解决JSON序列化问题
    */
-  private convertBigIntToString(data: any): any {
+  private convertBigIntToString(data: unknown): unknown {
     if (data === null || data === undefined) {
       return data;
     }
@@ -119,7 +122,7 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
     }
 
     if (typeof data === 'object') {
-      const result: any = {};
+      const result: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(data)) {
         result[key] = this.convertBigIntToString(value);
       }
@@ -132,7 +135,7 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
   /**
    * 生成ETag
    */
-  private generateETag(data: any): string {
+  private generateETag(data: unknown): string {
     const convertedData = this.convertBigIntToString(data);
     const content = JSON.stringify(convertedData);
     return `"${Buffer.from(content).toString('base64').slice(0, 16)}"`;
@@ -157,14 +160,17 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
   /**
    * 设置缓存数据
    */
-  private setToCache(key: string, data: any, etag: string): void {
+  private setToCache(key: string, data: unknown, etag: string): void {
     // 清理过期缓存
     this.cleanExpiredCache();
 
     // 如果缓存已满，删除最旧的条目
     if (this.cache.size >= this.MAX_CACHE_SIZE) {
-      const oldestKey = this.cache.keys().next().value;
-      this.cache.delete(oldestKey);
+      const iterator = this.cache.keys();
+      const oldestKey = iterator.next().value as string | undefined;
+      if (typeof oldestKey === 'string') {
+        this.cache.delete(oldestKey);
+      }
     }
 
     this.cache.set(key, {
@@ -220,7 +226,10 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
 
     if (!data || typeof data !== 'object') return;
 
-    const acceptEncoding = response.req.headers['accept-encoding'] || '';
+    const request = response.req as Request | undefined;
+    const acceptEncoding = request?.headers
+      ? (this.getHeaderValue(request.headers, 'accept-encoding') ?? '')
+      : '';
     const content = JSON.stringify(data);
 
     // 只压缩大于1KB的响应
@@ -238,8 +247,23 @@ export class ResponseOptimizationInterceptor implements NestInterceptor {
         }
       }
     } catch (error) {
-      this.logger.error('响应压缩失败:', error);
+      const message = error instanceof Error ? error.message : '未知错误';
+      this.logger.error('响应压缩失败:', message);
     }
+  }
+
+  private getHeaderValue(
+    headers: Request['headers'],
+    key: string,
+  ): string | undefined {
+    const value = headers[key];
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      return value[0];
+    }
+    return undefined;
   }
 
   /**

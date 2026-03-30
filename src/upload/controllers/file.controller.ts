@@ -5,7 +5,6 @@ import {
   Res,
   Req,
   NotFoundException,
-  StreamableFile,
   Header,
 } from '@nestjs/common';
 import { Response, Request } from 'express';
@@ -13,7 +12,6 @@ import { join } from 'path';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ConfigService } from '@nestjs/config';
-import { FileUtils } from '../utils/file.utils';
 
 @Controller('upload/file')
 export class FileController {
@@ -22,6 +20,16 @@ export class FileController {
   constructor(private readonly configService: ConfigService) {
     this.uploadDir =
       this.configService.get<string>('UPLOAD_DIR') || './uploads';
+  }
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    if (typeof error === 'string') {
+      return error;
+    }
+    return '未知错误';
   }
 
   /**
@@ -34,12 +42,12 @@ export class FileController {
    */
   @Get(':type/:filename')
   @Header('Cache-Control', 'max-age=2592000') // 30天缓存
-  async serveFile(
+  serveFile(
     @Param('type') type: string,
     @Param('filename') filename: string,
     @Req() req: Request,
     @Res() res: Response, // 移除 passthrough，直接控制响应
-  ): Promise<void> {
+  ): void {
     console.log(
       '📁 FileController.serveFile - 文件类型:',
       type,
@@ -120,11 +128,12 @@ export class FileController {
         fileStream.pipe(res);
       }
     } catch (error) {
-      console.log('💥 FileController 错误:', error.message);
+      const message = this.getErrorMessage(error);
+      console.log('💥 FileController 错误:', message);
       if (error instanceof NotFoundException) {
         res.status(404).json({
           statusCode: 404,
-          message: error.message,
+          message,
           error: 'Not Found',
         });
       } else {
@@ -146,7 +155,7 @@ export class FileController {
     const extension = path.extname(filePath).toLowerCase();
 
     // 常见MIME类型映射
-    const mimeTypes = {
+    const mimeTypes: Record<string, string> = {
       '.jpg': 'image/jpeg',
       '.jpeg': 'image/jpeg',
       '.png': 'image/png',
@@ -158,7 +167,7 @@ export class FileController {
       '.pdf': 'application/pdf',
     };
 
-    return mimeTypes[extension] || 'application/octet-stream';
+    return mimeTypes[extension] ?? 'application/octet-stream';
   }
 
   /**
@@ -168,7 +177,7 @@ export class FileController {
    */
   private sanitizeFilename(filename: string): string {
     // 提取基本文件名并移除任何路径分隔符和特殊字符
-    return filename.replace(/[\/\\?%*:|"<>]/g, '');
+    return filename.replace(/[/\\?%*:|"<>]/g, '');
   }
 
   /**
@@ -181,7 +190,7 @@ export class FileController {
     let sanitized = filePath.startsWith('/') ? filePath.substring(1) : filePath;
 
     // 防止目录遍历攻击：移除 ../ 和 ..\
-    sanitized = sanitized.replace(/\.\.[\/\\]/g, '');
+    sanitized = sanitized.replace(/\.\.[/\\]/g, '');
 
     // 移除危险字符但保留正常的路径分隔符
     sanitized = sanitized.replace(/[?%*:|"<>]/g, '');

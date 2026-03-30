@@ -25,6 +25,7 @@ import { EnhancedDeletionService } from './services/enhanced-deletion.service';
 import { MediaCleanupScheduler } from './services/media-cleanup.scheduler';
 import { MediaCleanupProcessor } from './processors/media-cleanup.processor';
 import { MediaViewController } from './controllers/media-view/media-view.controller';
+import { GuestDownloadRateLimitService } from './services/guest-download-rate-limit.service';
 
 @Module({
   imports: [
@@ -60,7 +61,13 @@ import { MediaViewController } from './controllers/media-view/media-view.control
     EnhancedDeletionService,
     MediaCleanupScheduler,
     MediaCleanupProcessor,
+    GuestDownloadRateLimitService,
   ],
-  exports: [MediaService, MediaInteractionService, EnhancedDeletionService],
+  exports: [
+    MediaService,
+    MediaInteractionService,
+    EnhancedDeletionService,
+    GuestDownloadRateLimitService,
+  ],
 })
 export class MediaModule {}

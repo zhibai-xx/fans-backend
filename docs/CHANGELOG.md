@@ -1,3 +1,51 @@
+# 2026-03-17
+- 上线前部署收口：新增后端 `Dockerfile` 与 `.dockerignore`，可直接构建生产镜像并通过 `npm run start:prod` 以 `3000` 端口启动
+- 生产代理适配：Nest 启动时在 `TRUST_PROXY=true` 或生产环境下启用 `trust proxy`，确保后续挂在 Nginx/CDN 后能正确获取真实来源链路
+- body parser 调试日志改为 `BODY_PARSER_DEBUG` 显式开关，默认不再在运行时打印原始请求头，避免生产环境日志泄露与噪音
+- 新增后端视频功能开关 `ENABLE_VIDEO_FEATURE=false`，首发阶段默认关闭视频上传、系统导入视频文件与视频处理控制器入口
+- 上传链路统一拒绝视频：`/upload/init`、分片合并与 system-ingest 初始化在视频关闭时返回明确错误，避免前端隐藏后仍可从接口写入视频数据
+- 媒体层与视频处理层同步封口：`MediaService.create` 不再接受 `VIDEO` 媒体创建，`/video-processing/*` 在视频关闭时直接返回业务错误
+- 主要改动文件：`Dockerfile`、`.dockerignore`、`src/main.ts`、`src/config/env.validation.ts`、`.env.example`、`src/upload/upload.service.ts`、`src/media/media.service.ts`、`src/video-processing/controllers/video-processing.controller.ts`
+- 接口契约变更：是（视频关闭时相关入口返回 400，并附带明确提示文案）
+
+# 2026-02-28
+- 下载链路升级为“游客可下载 + Redis 限流 + 短时签名链接”：`POST /api/media/:mediaId/download` 改为可选登录（登录用户记录下载，游客走 Redis 限流），新增 `GET /api/media/:mediaId/download/signed` 校验签名后重定向真实文件地址
+- 新增 `GuestDownloadRateLimitService`，将游客下载限流从进程内 `Map` 迁移到 Redis（每小时上限 + 最短间隔），为多实例部署保持一致性
+- 补充 Redis 与下载签名环境变量键位：`REDIS_HOST/REDIS_PORT/REDIS_PASSWORD/REDIS_DB/DOWNLOAD_SIGN_SECRET`
+- 主要改动文件：`src/media/controllers/media-download.controller.ts`、`src/media/services/guest-download-rate-limit.service.ts`、`src/media/media.module.ts`、`.env.example`
+- 接口契约变更：是（下载接口返回 `download_url` 由直接文件地址改为短时签名地址）
+
+# 2026-02-12
+- 修复自定义 body parser 运行时异常：`main.ts` 改为 `import express from 'express'`，确保 `express.json`/`express.urlencoded` 在运行时可调用，消除 `Cannot read properties of undefined (reading 'json')`
+- JWT 与 CORS 安全基线加固：新增 `security.config`，强制校验 `JWT_SECRET` 不可为空/占位值；CORS 改为读取 `CORS_ORIGINS`（生产环境必填，开发环境回退本地 3001）
+- 同步更新 `.env.example` 与 `env.example` 的 `JWT_SECRET`、`CORS_ORIGINS` 配置示例
+- 新增 refresh token 认证链路：`POST /api/users/login` 现返回 `access_token + refresh_token`，并新增 `POST /api/users/refresh-token` 用于换发 token 对
+- JWT 生命周期改为环境化：`JWT_ACCESS_EXPIRES_IN`（默认 15m）与 `JWT_REFRESH_EXPIRES_IN`（默认 30d）；`JWT_REFRESH_SECRET` 在生产环境强制配置
+- 新增会话失效控制：`User.session_version` 字段 + JWT 版本校验，登录会提升版本并使旧端 access/refresh token 失效；新增 `POST /api/users/logout` 主动失效当前会话
+- 新增认证流程回归测试：覆盖登录→刷新→异地登录挤下线→登出失效，补充 refresh/logout 契约检查，确保会话策略可回归验证
+- 新增 HTTP 层认证 e2e（Nest app + supertest）：默认在受限环境跳过，设置 `ALLOW_SOCKET_TESTS=true` 可启用执行
+- 登录安全增强：`/api/users/login` 增加前置防刷检查（IP 频率限制 + IP/账户失败次数锁定），命中后返回 429 并记录 `BLOCKED` 登录日志
+- 新增登录防刷单测 `tests/unit/auth/login-guard.spec.ts`，覆盖“IP 频率超限/账户失败超限/正常放行”
+- 新增登录限流集成测试 `tests/integration/auth/login-rate-limit.spec.ts`，验证命中限制时抛出 429 且写入 `BLOCKED` 登录日志
+- 安全基线新增生产参数与告警阈值建议：补充 `LOGIN_*` 推荐值、`BLOCKED`/失败率/refresh 失败率阈值，以及分阶段调参策略
+- 新增低成本健康探针：后端提供 `/api/health`（服务状态、数据库连通、uptime），并补充对应单测 `tests/unit/app/health.spec.ts`
+# 2026-03-16
+- `system-ingest` 真实目录联调通过：已验证 `/Users/houjiawei/Desktop/Projects/Scripts/weibo-crawler/weibo` 的扫描、预览、图片导入与 `live_photo` 视频导入链路
+- 系统导入元数据识别增强：中文目录 `原创/原图` 与 `live_photo` 现在会正确映射为 `original/live` 分类，新增媒体标题不再误标为 `general`
+- 新增后端压测/安全 smoke 脚本：`tests/performance/public-endpoints.smoke.cjs`、`tests/performance/system-ingest-scan.smoke.cjs`、`tests/security/auth-download.smoke.cjs`
+- 新增并发导入与 Redis 故障演练脚本：`tests/performance/system-ingest-concurrency.smoke.cjs`、`tests/resilience/redis-download-failure.smoke.cjs`
+- 新增真实分片上传并发 smoke：`tests/performance/upload-chunk-concurrency.smoke.cjs`，已验证 2 个图片文件并发 init/chunk/merge 可成功完成
+- 游客下载限流改为 Redis 故障快速失败：Redis 不可用时下载接口返回 `503`，不再出现请求长时间挂起；`/api/health` 现同时检查 database 与 redis
+- OSS 存储服务改为懒初始化：`USE_OSS_STORAGE=false` 时不再因为未配置真实 OSS 凭证导致应用启动失败
+- 新增存储 readiness 检查：`tests/readiness/storage-mode.smoke.cjs`，当前本地环境会明确标记为 local 模式，提示 OSS/CDN 真实链路需在启用 OSS 后再验
+- 后端验证通过：`npm run typecheck`、`ALLOW_SOCKET_TESTS=true npm run test:integration`、`npm run test:perf:baseline`、`npm run test:perf:ingest-scan`、`npm run test:security:smoke`
+
+- 修复环境变量加载时机问题：`ConfigModule` 支持 `.env.local` 优先，`JwtModule` 改为 `registerAsync` 避免模块初始化阶段提前读取 `JWT_SECRET` 导致启动报错
+- 环境模板统一：移除重复 `env.example`，仅保留 `.env.example`；README 改为 `cp .env.example .env`，并清理模板中的真实密钥为占位值
+- 新增“上线最小交付清单（后端）”决策，明确本地达标、采购、部署、回滚四阶段步骤，降低前期上云试错成本
+- 涉及文件：`src/main.ts`、`src/config/security.config.ts`、`src/auth/auth.module.ts`、`src/auth/strategies/jwt.strategy.ts`、`src/auth/services/auth.service.ts`、`src/auth/services/user.service.ts`、`src/auth/controllers/user.controller.ts`、`src/auth/dto/refresh-token.dto.ts`、`src/logs/services/login-log.service.ts`、`prisma/schema.prisma`、`prisma/migrations/20260212191000_add_user_session_version/migration.sql`、`tests/jest.unit.config.js`、`tests/jest.integration.config.js`、`tests/unit/auth/jwt-auth.spec.ts`、`tests/unit/auth/login-guard.spec.ts`、`tests/integration/auth/session-contract.spec.ts`、`tests/integration/auth/session-flow.spec.ts`、`tests/integration/auth/auth-http.e2e.spec.ts`、`.env.example`、`env.example`
+- 接口契约变更：是（登录响应新增 `refresh_token`，新增 `/api/users/refresh-token`、`/api/users/logout`）
+
 # 2025-11-12
 - 媒体回收站定时任务改为调用 `cleanupRecycleBin`：BullMQ worker 会先清理到期的拒稿文件，再执行硬删除，确保 30 天后无需人工介入也能释放存储
 

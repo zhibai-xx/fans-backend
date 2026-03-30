@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import execa = require('execa');
-import * as ffmpegStatic from 'ffmpeg-static';
+import execa from 'execa';
+import ffmpegStatic from 'ffmpeg-static';
 import * as ffprobeStatic from 'ffprobe-static';
 import * as fs from 'fs-extra';
 import * as path from 'path';
@@ -26,6 +26,34 @@ export interface VideoQuality {
   maxBitrate: string;
   bufsize: string;
 }
+
+type FfprobeFormat = {
+  duration?: string | number;
+  bit_rate?: string | number;
+  format_name?: string;
+  size?: string | number;
+};
+
+type FfprobeStream = {
+  codec_type?: string;
+  width?: number;
+  height?: number;
+  codec_name?: string;
+  r_frame_rate?: string;
+  avg_frame_rate?: string;
+  rotation?: number | string;
+  tags?: {
+    rotate?: string | number;
+  };
+  side_data_list?: Array<{
+    rotation?: number | string;
+  }>;
+};
+
+type FfprobeResult = {
+  format: FfprobeFormat;
+  streams: FfprobeStream[];
+};
 
 /**
  * FFmpeg服务 - 使用原生FFmpeg CLI替代废弃的fluent-ffmpeg
@@ -123,11 +151,42 @@ export class FFmpegService {
 
   constructor(private configService: ConfigService) {
     // 确保FFmpeg和FFprobe路径可用
-    this.ffmpegPath = (ffmpegStatic as any) || 'ffmpeg';
-    this.ffprobePath = ffprobeStatic.path || 'ffprobe';
+    this.ffmpegPath = this.resolveFfmpegPath();
+    this.ffprobePath = this.resolveFfprobePath();
 
     this.logger.log(`FFmpeg path: ${this.ffmpegPath}`);
     this.logger.log(`FFprobe path: ${this.ffprobePath}`);
+  }
+
+  private resolveFfmpegPath(): string {
+    return typeof ffmpegStatic === 'string' ? ffmpegStatic : 'ffmpeg';
+  }
+
+  private resolveFfprobePath(): string {
+    const candidate = ffprobeStatic as { path?: unknown } | null;
+    return typeof candidate?.path === 'string' ? candidate.path : 'ffprobe';
+  }
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    if (typeof error === 'string') {
+      return error;
+    }
+    return '未知错误';
+  }
+
+  private getErrorStack(error: unknown): string | undefined {
+    return error instanceof Error ? error.stack : undefined;
+  }
+
+  private getErrorStderr(error: unknown): string | undefined {
+    if (!error || typeof error !== 'object') {
+      return undefined;
+    }
+    const candidate = error as { stderr?: unknown };
+    return typeof candidate.stderr === 'string' ? candidate.stderr : undefined;
   }
 
   /**
@@ -140,7 +199,9 @@ export class FFmpegService {
       await this.getVideoMetadata(videoPath);
       return true;
     } catch (error) {
-      this.logger.warn(`视频文件验证失败: ${videoPath} - ${error.message}`);
+      this.logger.warn(
+        `视频文件验证失败: ${videoPath} - ${this.getErrorMessage(error)}`,
+      );
       return false;
     }
   }
@@ -164,9 +225,9 @@ export class FFmpegService {
         videoPath,
       ]);
 
-      const metadata = JSON.parse(stdout);
+      const metadata = JSON.parse(stdout) as FfprobeResult;
       const videoStream = metadata.streams.find(
-        (stream: any) => stream.codec_type === 'video',
+        (stream) => stream.codec_type === 'video',
       );
 
       if (!videoStream) {
@@ -180,7 +241,7 @@ export class FFmpegService {
         rotation = Number(videoStream.tags.rotate) || 0;
       } else if (Array.isArray(videoStream.side_data_list)) {
         const rotationEntry = videoStream.side_data_list.find(
-          (item: any) => item.rotation !== undefined,
+          (item) => item.rotation !== undefined,
         );
         if (rotationEntry) {
           rotation = Number(rotationEntry.rotation) || 0;
@@ -209,8 +270,11 @@ export class FFmpegService {
       );
       return result;
     } catch (error) {
-      this.logger.error(`提取视频元数据失败: ${error.message}`, error.stack);
-      throw new Error(`提取视频元数据失败: ${error.message}`);
+      this.logger.error(
+        `提取视频元数据失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
+      throw new Error(`提取视频元数据失败: ${this.getErrorMessage(error)}`);
     }
   }
 
@@ -286,11 +350,15 @@ export class FFmpegService {
 
     try {
       const { stdout, stderr } = await execa(this.ffmpegPath, args);
+      void stderr;
       this.logger.debug(`FFmpeg输出: ${stdout}`);
       this.logger.log(`视频转码完成: ${outputPath}`);
     } catch (error) {
-      this.logger.error(`视频转码失败: ${error.message}`, error.stderr);
-      throw new Error(`视频转码失败: ${error.message}`);
+      this.logger.error(
+        `视频转码失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStderr(error),
+      );
+      throw new Error(`视频转码失败: ${this.getErrorMessage(error)}`);
     }
   }
 
@@ -337,8 +405,11 @@ export class FFmpegService {
       this.logger.debug(`FFmpeg MOV转换输出: ${stdout}`);
       this.logger.debug(`FFmpeg MOV转换错误输出: ${stderr}`);
     } catch (error) {
-      this.logger.error(`转换MOV到MP4失败: ${error.message}`, error.stack);
-      throw new Error(`转换MOV到MP4失败: ${error.message}`);
+      this.logger.error(
+        `转换MOV到MP4失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStack(error),
+      );
+      throw new Error(`转换MOV到MP4失败: ${this.getErrorMessage(error)}`);
     }
   }
 
@@ -504,8 +575,11 @@ export class FFmpegService {
 
       return thumbnails;
     } catch (error) {
-      this.logger.error(`生成缩略图失败: ${error.message}`, error.stderr);
-      throw new Error(`生成缩略图失败: ${error.message}`);
+      this.logger.error(
+        `生成缩略图失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStderr(error),
+      );
+      throw new Error(`生成缩略图失败: ${this.getErrorMessage(error)}`);
     }
   }
 
@@ -585,8 +659,6 @@ export class FFmpegService {
 
       // 2. 计算精灵图尺寸
       const rows = Math.ceil(thumbCount / columns);
-      const spriteWidth = columns * thumbWidth;
-      const spriteHeight = rows * thumbHeight;
 
       // 3. 合并所有缩略图为精灵图
       const tilePattern = `${columns}x${rows}`;
@@ -624,8 +696,11 @@ export class FFmpegService {
     } catch (error) {
       // 清理临时文件
       await fs.remove(tempDir).catch(() => {});
-      this.logger.error(`生成精灵图失败: ${error.message}`, error.stderr);
-      throw new Error(`生成精灵图失败: ${error.message}`);
+      this.logger.error(
+        `生成精灵图失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStderr(error),
+      );
+      throw new Error(`生成精灵图失败: ${this.getErrorMessage(error)}`);
     }
   }
 
@@ -704,8 +779,11 @@ export class FFmpegService {
       this.logger.log(`HLS流生成完成: ${masterPlaylistPath}`);
       return masterPlaylistPath;
     } catch (error) {
-      this.logger.error(`HLS流生成失败: ${error.message}`, error.stderr);
-      throw new Error(`HLS流生成失败: ${error.message}`);
+      this.logger.error(
+        `HLS流生成失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStderr(error),
+      );
+      throw new Error(`HLS流生成失败: ${this.getErrorMessage(error)}`);
     }
   }
 
@@ -817,8 +895,11 @@ export class FFmpegService {
       if (stdout) this.logger.debug(`FFmpeg stdout: ${stdout}`);
       if (stderr) this.logger.debug(`FFmpeg stderr: ${stderr}`);
     } catch (error) {
-      this.logger.error(`FFmpeg执行失败: ${error.message}`, error.stderr);
-      throw new Error(`FFmpeg执行失败: ${error.message}`);
+      this.logger.error(
+        `FFmpeg执行失败: ${this.getErrorMessage(error)}`,
+        this.getErrorStderr(error),
+      );
+      throw new Error(`FFmpeg执行失败: ${this.getErrorMessage(error)}`);
     }
   }
 }

@@ -1,7 +1,6 @@
 import {
   Injectable,
   NotFoundException,
-  BadRequestException,
   ConflictException,
 } from '@nestjs/common';
 import { DatabaseService } from 'src/database/database.service';
@@ -75,7 +74,9 @@ export class MediaInteractionService {
         return like;
       });
     } catch (error) {
-      this.logger.error(`点赞失败: ${error.message}`, error.stack);
+      const errorMessage = this.getErrorMessage(error);
+      const errorStack = this.getErrorStack(error);
+      this.logger.error(`点赞失败: ${errorMessage}`, errorStack);
       throw error;
     }
   }
@@ -122,7 +123,9 @@ export class MediaInteractionService {
         });
       });
     } catch (error) {
-      this.logger.error(`取消点赞失败: ${error.message}`, error.stack);
+      const errorMessage = this.getErrorMessage(error);
+      const errorStack = this.getErrorStack(error);
+      this.logger.error(`取消点赞失败: ${errorMessage}`, errorStack);
       throw error;
     }
   }
@@ -154,7 +157,9 @@ export class MediaInteractionService {
 
       return new LikeStatusDto(!!existingLike, media.likes_count);
     } catch (error) {
-      this.logger.error(`获取点赞状态失败: ${error.message}`, error.stack);
+      const errorMessage = this.getErrorMessage(error);
+      const errorStack = this.getErrorStack(error);
+      this.logger.error(`获取点赞状态失败: ${errorMessage}`, errorStack);
       throw error;
     }
   }
@@ -214,7 +219,9 @@ export class MediaInteractionService {
         return favorite;
       });
     } catch (error) {
-      this.logger.error(`收藏失败: ${error.message}`, error.stack);
+      const errorMessage = this.getErrorMessage(error);
+      const errorStack = this.getErrorStack(error);
+      this.logger.error(`收藏失败: ${errorMessage}`, errorStack);
       throw error;
     }
   }
@@ -261,7 +268,9 @@ export class MediaInteractionService {
         });
       });
     } catch (error) {
-      this.logger.error(`取消收藏失败: ${error.message}`, error.stack);
+      const errorMessage = this.getErrorMessage(error);
+      const errorStack = this.getErrorStack(error);
+      this.logger.error(`取消收藏失败: ${errorMessage}`, errorStack);
       throw error;
     }
   }
@@ -296,7 +305,9 @@ export class MediaInteractionService {
 
       return new FavoriteStatusDto(!!existingFavorite, media.favorites_count);
     } catch (error) {
-      this.logger.error(`获取收藏状态失败: ${error.message}`, error.stack);
+      const errorMessage = this.getErrorMessage(error);
+      const errorStack = this.getErrorStack(error);
+      this.logger.error(`获取收藏状态失败: ${errorMessage}`, errorStack);
       throw error;
     }
   }
@@ -349,7 +360,9 @@ export class MediaInteractionService {
         },
       };
     } catch (error) {
-      this.logger.error(`获取用户收藏列表失败: ${error.message}`, error.stack);
+      const errorMessage = this.getErrorMessage(error);
+      const errorStack = this.getErrorStack(error);
+      this.logger.error(`获取用户收藏列表失败: ${errorMessage}`, errorStack);
       throw error;
     }
   }
@@ -401,7 +414,9 @@ export class MediaInteractionService {
         media.favorites_count,
       );
     } catch (error) {
-      this.logger.error(`获取媒体互动状态失败: ${error.message}`, error.stack);
+      const errorMessage = this.getErrorMessage(error);
+      const errorStack = this.getErrorStack(error);
+      this.logger.error(`获取媒体互动状态失败: ${errorMessage}`, errorStack);
       throw error;
     }
   }
@@ -433,7 +448,9 @@ export class MediaInteractionService {
 
       return new BatchLikeStatusDto(likesStatus);
     } catch (error) {
-      this.logger.error(`批量获取点赞状态失败: ${error.message}`, error.stack);
+      const errorMessage = this.getErrorMessage(error);
+      const errorStack = this.getErrorStack(error);
+      this.logger.error(`批量获取点赞状态失败: ${errorMessage}`, errorStack);
       throw error;
     }
   }
@@ -467,7 +484,9 @@ export class MediaInteractionService {
 
       return new BatchFavoriteStatusDto(favoritesStatus);
     } catch (error) {
-      this.logger.error(`批量获取收藏状态失败: ${error.message}`, error.stack);
+      const errorMessage = this.getErrorMessage(error);
+      const errorStack = this.getErrorStack(error);
+      this.logger.error(`批量获取收藏状态失败: ${errorMessage}`, errorStack);
       throw error;
     }
   }
@@ -503,7 +522,9 @@ export class MediaInteractionService {
 
       return stats;
     } catch (error) {
-      this.logger.error(`获取媒体统计信息失败: ${error.message}`, error.stack);
+      const errorMessage = this.getErrorMessage(error);
+      const errorStack = this.getErrorStack(error);
+      this.logger.error(`获取媒体统计信息失败: ${errorMessage}`, errorStack);
       throw error;
     }
   }
@@ -542,8 +563,21 @@ export class MediaInteractionService {
         received_favorites: receivedFavorites._sum.favorites_count || 0,
       };
     } catch (error) {
-      this.logger.error(`获取用户互动统计失败: ${error.message}`, error.stack);
+      const errorMessage = this.getErrorMessage(error);
+      const errorStack = this.getErrorStack(error);
+      this.logger.error(`获取用户互动统计失败: ${errorMessage}`, errorStack);
       throw error;
     }
+  }
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return '未知错误';
+  }
+
+  private getErrorStack(error: unknown): string | undefined {
+    return error instanceof Error ? error.stack : undefined;
   }
 }

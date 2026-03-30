@@ -29,6 +29,12 @@ export class CreateFavoriteDto {
 /**
  * 收藏记录响应DTO
  */
+type FavoriteRecord = {
+  id: string;
+  media_id: string;
+  created_at: Date | string;
+};
+
 export class FavoriteResponseDto {
   @ApiProperty({ description: '收藏记录ID' })
   id: string;
@@ -40,17 +46,28 @@ export class FavoriteResponseDto {
   user_uuid: string;
 
   @ApiProperty({ description: '收藏时间' })
-  @Transform(({ value }) =>
-    value ? new Date(value).toISOString() : new Date().toISOString(),
-  )
+  @Transform(({ value }) => toIsoStringValue(value))
   created_at: string;
 
-  constructor(favorite: any, userUuid: string) {
+  constructor(favorite: FavoriteRecord, userUuid: string) {
     this.id = favorite.id;
     this.media_id = favorite.media_id;
     this.user_uuid = userUuid;
-    this.created_at = favorite.created_at;
+    this.created_at = new Date(favorite.created_at).toISOString();
   }
+}
+
+function toIsoStringValue(value: unknown): string {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+  }
+  return new Date().toISOString();
 }
 
 /**
@@ -97,15 +114,17 @@ export class FavoriteListResponseDto {
   data: FavoriteResponseDto[];
 
   @ApiProperty({ description: '分页信息' })
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-  };
+  pagination: FavoritePagination;
 
-  constructor(data: FavoriteResponseDto[], pagination: any) {
+  constructor(data: FavoriteResponseDto[], pagination: FavoritePagination) {
     this.data = data;
     this.pagination = pagination;
   }
 }
+
+type FavoritePagination = {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+};

@@ -23,7 +23,6 @@ import {
 import { Request as ExpressRequest } from 'express';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { UserUuidService } from 'src/auth/services/user-uuid.service';
-import { MyLoggerService } from 'src/my-logger/my-logger.service';
 import { MediaInteractionService } from '../media-interaction.service';
 import {
   CreateFavoriteDto,
@@ -43,7 +42,20 @@ import {
 
 // 扩展 Request 类型
 type RequestWithUser = ExpressRequest & {
-  user: { id: number; [key: string]: any };
+  user: { id: number; [key: string]: unknown };
+};
+
+type FavoriteListItem = {
+  id: string;
+  created_at: Date;
+  media: Record<string, unknown>;
+};
+
+type FavoritePagination = {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
 };
 
 @ApiTags('媒体互动')
@@ -52,10 +64,6 @@ type RequestWithUser = ExpressRequest & {
 @ApiBearerAuth()
 @UseInterceptors(ClassSerializerInterceptor)
 export class MediaInteractionController {
-  private readonly logger = new MyLoggerService(
-    MediaInteractionController.name,
-  );
-
   constructor(
     private readonly mediaInteractionService: MediaInteractionService,
     private readonly userUuidService: UserUuidService,
@@ -234,10 +242,11 @@ export class MediaInteractionController {
   async getMyFavorites(
     @Query() query: FavoriteListQueryDto,
     @Req() req: RequestWithUser,
-  ): Promise<{ success: boolean; data: any[]; pagination: any }> {
-    const userUuid = await this.userUuidService.getUuidByInternalId(
-      req.user.id,
-    );
+  ): Promise<{
+    success: boolean;
+    data: FavoriteListItem[];
+    pagination: FavoritePagination;
+  }> {
     const result = await this.mediaInteractionService.getUserFavorites(
       req.user.id,
       query.page || 1,

@@ -30,6 +30,7 @@ model User {
   avatar_url   String? @default("/api/upload/file/avatars/default.webp") // 头像URL
   role         UserRole @default(USER)              // 角色：USER/ADMIN
   status       UserStatus @default(ACTIVE)          // 状态：ACTIVE/SUSPENDED
+  session_version Int @default(0)                   // 会话版本号，用于令牌失效控制
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
 

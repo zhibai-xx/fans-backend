@@ -13,6 +13,20 @@ import * as fs from 'fs-extra';
  * - 分片文件管理
  * - CDN友好的配置
  */
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return '未知错误';
+};
+
+const getErrorStack = (error: unknown): string | undefined => {
+  return error instanceof Error ? error.stack : undefined;
+};
+
 @Injectable()
 export class HlsService {
   private readonly logger = new Logger(HlsService.name);
@@ -122,7 +136,10 @@ export class HlsService {
       );
       return { masterPlaylist, qualities };
     } catch (error) {
-      this.logger.error(`生成HLS流失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `生成HLS流失败: ${getErrorMessage(error)}`,
+        getErrorStack(error),
+      );
       // 清理部分生成的文件
       await this.cleanupPartialHLS(outputDir).catch(() => {});
       throw error;
@@ -152,11 +169,11 @@ export class HlsService {
     playlistPath: string;
     segmentCount: number;
   }> {
+    void options;
     const qualityDir = path.join(outputDir, quality.name);
     await fs.ensureDir(qualityDir);
 
     const playlistPath = path.join(qualityDir, 'playlist.m3u8');
-    const segmentPattern = path.join(qualityDir, 'segment_%03d.ts');
 
     this.logger.debug(`生成${quality.name}质量HLS流: ${playlistPath}`);
 
@@ -182,7 +199,9 @@ export class HlsService {
         segmentCount,
       };
     } catch (error) {
-      this.logger.error(`生成${quality.name}质量HLS流失败: ${error.message}`);
+      this.logger.error(
+        `生成${quality.name}质量HLS流失败: ${getErrorMessage(error)}`,
+      );
       throw error;
     }
   }
@@ -244,7 +263,7 @@ export class HlsService {
       const files = await fs.readdir(qualityDir);
       return files.filter((file) => file.endsWith('.ts')).length;
     } catch (error) {
-      this.logger.warn(`统计HLS分片失败: ${error.message}`);
+      this.logger.warn(`统计HLS分片失败: ${getErrorMessage(error)}`);
       return 0;
     }
   }
@@ -275,7 +294,7 @@ export class HlsService {
       this.logger.debug(`清理部分HLS文件: ${outputDir}`);
       await fs.remove(outputDir);
     } catch (error) {
-      this.logger.warn(`清理HLS文件失败: ${error.message}`);
+      this.logger.warn(`清理HLS文件失败: ${getErrorMessage(error)}`);
     }
   }
 
@@ -332,8 +351,8 @@ export class HlsService {
 
       return { isValid, issues };
     } catch (error) {
-      this.logger.error(`HLS验证失败: ${error.message}`);
-      issues.push(`验证过程出错: ${error.message}`);
+      this.logger.error(`HLS验证失败: ${getErrorMessage(error)}`);
+      issues.push(`验证过程出错: ${getErrorMessage(error)}`);
       return { isValid: false, issues };
     }
   }
@@ -426,7 +445,7 @@ export class HlsService {
 
       return { qualities, totalSize, duration };
     } catch (error) {
-      this.logger.error(`获取HLS信息失败: ${error.message}`);
+      this.logger.error(`获取HLS信息失败: ${getErrorMessage(error)}`);
       return { qualities: [], totalSize: 0, duration: 0 };
     }
   }

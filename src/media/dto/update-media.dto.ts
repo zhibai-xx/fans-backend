@@ -30,12 +30,9 @@ export class UpdateMediaDto {
    * 分类ID - 自动转换空字符串为undefined
    */
   @Transform(({ value }) => {
-    if (value === '' || value === null) {
-      return undefined;
-    }
-    return value;
+    return normalizeOptionalUuid(value);
   })
-  @ValidateIf((o) => o.category_id !== undefined)
+  @ValidateIf((dto: UpdateMediaDto) => dto.category_id !== undefined)
   @IsUUID()
   category_id?: string;
 
@@ -62,4 +59,12 @@ export class UpdateMediaDto {
   @IsUUID(4, { each: true })
   @IsOptional()
   tag_ids?: string[];
+}
+
+function normalizeOptionalUuid(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }

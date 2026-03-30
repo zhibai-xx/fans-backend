@@ -9,7 +9,7 @@ export class MyLoggerService extends ConsoleLogger {
    * 将日志条目写入文件
    * @param entry 日志条目内容
    */
-  async logToFile(entry) {
+  async logToFile(entry: string): Promise<void> {
     // 格式化日志条目，添加时间戳（使用中国时区）
     const formattedEntry = `${Intl.DateTimeFormat('zh-CN', {
       dateStyle: 'short',
@@ -38,9 +38,9 @@ export class MyLoggerService extends ConsoleLogger {
    * @param message 日志消息
    * @param context 日志上下文
    */
-  log(message: any, context?: string) {
-    const entry = `${context}\t${message}`;
-    this.logToFile(entry);
+  log(message: unknown, context?: string) {
+    const entry = `${context ?? ''}\t${this.formatLogMessage(message)}`;
+    void this.logToFile(entry);
     super.log(message, context);
   }
 
@@ -49,9 +49,26 @@ export class MyLoggerService extends ConsoleLogger {
    * @param message 错误消息
    * @param stackOrContext 错误堆栈或上下文
    */
-  error(message: any, stackOrContext?: string) {
-    const entry = `${stackOrContext}\t${message}`;
-    this.logToFile(entry);
+  error(message: unknown, stackOrContext?: string) {
+    const entry = `${stackOrContext ?? ''}\t${this.formatLogMessage(message)}`;
+    void this.logToFile(entry);
     super.error(message, stackOrContext);
+  }
+
+  private formatLogMessage(message: unknown): string {
+    if (message instanceof Error) {
+      return message.message;
+    }
+    if (typeof message === 'string') {
+      return message;
+    }
+    if (typeof message === 'number' || typeof message === 'boolean') {
+      return message.toString();
+    }
+    try {
+      return JSON.stringify(message);
+    } catch {
+      return 'unknown';
+    }
   }
 }

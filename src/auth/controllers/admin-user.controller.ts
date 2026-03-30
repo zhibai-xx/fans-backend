@@ -2,7 +2,6 @@ import {
   Controller,
   Get,
   Put,
-  Delete,
   Param,
   Query,
   Body,
@@ -14,6 +13,16 @@ import { UserService } from '../services/user.service';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { AdminRoleGuard } from '../guards/admin-role.guard';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return '未知错误';
+};
 
 @ApiTags('管理员-用户管理')
 @Controller('admin/users')
@@ -55,7 +64,7 @@ export class AdminUserController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: getErrorMessage(error),
       };
     }
   }
@@ -76,7 +85,7 @@ export class AdminUserController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: getErrorMessage(error),
       };
     }
   }
@@ -101,7 +110,7 @@ export class AdminUserController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: getErrorMessage(error),
       };
     }
   }
@@ -126,7 +135,7 @@ export class AdminUserController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: getErrorMessage(error),
       };
     }
   }
@@ -157,7 +166,7 @@ export class AdminUserController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: getErrorMessage(error),
       };
     }
   }
@@ -178,7 +187,7 @@ export class AdminUserController {
     } catch (error) {
       return {
         success: false,
-        message: error.message,
+        message: getErrorMessage(error),
       };
     }
   }

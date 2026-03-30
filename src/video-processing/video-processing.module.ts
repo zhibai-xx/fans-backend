@@ -27,7 +27,7 @@ import { MyLoggerModule } from '../my-logger/my-logger.module';
     MyLoggerModule,
     // 配置BullMQ队列用于异步视频处理
     BullModule.forRootAsync({
-      useFactory: async (configService: ConfigService) => ({
+      useFactory: (configService: ConfigService) => ({
         connection: {
           host: configService.get('REDIS_HOST', 'localhost'),
           port: configService.get('REDIS_PORT', 6379),

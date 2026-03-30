@@ -54,7 +54,7 @@ export class FileUtils {
    * @returns 文件扩展名（包含点，如 .jpg）
    */
   static getExtensionFromMimeType(mimeType: string): string {
-    const mimeMap = {
+    const mimeMap: Record<string, string> = {
       'image/jpeg': '.jpg',
       'image/png': '.png',
       'image/gif': '.gif',
@@ -69,7 +69,7 @@ export class FileUtils {
         '.docx',
     };
 
-    return mimeMap[mimeType] || '.bin';
+    return mimeMap[mimeType] ?? '.bin';
   }
 
   /**

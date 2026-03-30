@@ -8,6 +8,16 @@ import * as path from 'path';
 import { Prisma } from '@prisma/client';
 import { getProcessedMediaDir } from 'src/common/utils/storage-path.util';
 
+type EnhancedDeletionOptions = {
+  forceDelete?: boolean;
+  createBackup?: boolean;
+  reason?: string;
+};
+
+type MediaWithQualities = Prisma.MediaGetPayload<{
+  include: { video_qualities: true };
+}>;
+
 @Injectable()
 export class EnhancedDeletionService {
   private readonly logger = new Logger(EnhancedDeletionService.name);
@@ -27,11 +37,7 @@ export class EnhancedDeletionService {
   async enhancedDelete(
     mediaIds: string[],
     adminId: number,
-    options: {
-      forceDelete?: boolean;
-      createBackup?: boolean;
-      reason?: string;
-    } = {},
+    options: EnhancedDeletionOptions = {},
   ): Promise<DeletionSummary> {
     const results: DeletionResult[] = [];
     let totalFilesCleanedUp = 0;
@@ -60,10 +66,11 @@ export class EnhancedDeletionService {
           totalSpaceFreed += result.spaceFreed;
         }
       } catch (error) {
+        const errorMessage = this.getErrorMessage(error);
         results.push({
           success: false,
           mediaId,
-          message: `删除失败: ${error.message}`,
+          message: `删除失败: ${errorMessage}`,
           filesDeleted: {
             mainFile: false,
             thumbnail: false,
@@ -73,7 +80,7 @@ export class EnhancedDeletionService {
             extraFiles: 0,
           },
           spaceFreed: 0,
-          error: error.message,
+          error: errorMessage,
         });
       }
     }
@@ -100,7 +107,7 @@ export class EnhancedDeletionService {
   private async deleteMediaWithValidation(
     mediaId: string,
     adminId: number,
-    options: any,
+    options: EnhancedDeletionOptions,
   ): Promise<DeletionResult> {
     const result: DeletionResult = {
       success: false,
@@ -136,7 +143,8 @@ export class EnhancedDeletionService {
         await this.createDeletionBackup(media);
         result.backupCreated = true;
       } catch (error) {
-        this.logger.warn(`创建备份失败: ${error.message}`);
+        const errorMessage = this.getErrorMessage(error);
+        this.logger.warn(`创建备份失败: ${errorMessage}`);
       }
     }
 
@@ -240,7 +248,7 @@ export class EnhancedDeletionService {
     ]);
 
     // 6. 记录删除日志
-    await this.logDeletion(mediaId, adminId, options.reason, result);
+    await this.logDeletion(mediaId, adminId, options.reason ?? '', result);
 
     result.success = true;
     result.message = '删除成功';
@@ -290,7 +298,8 @@ export class EnhancedDeletionService {
             return false;
           }
         } catch (error) {
-          this.logger.error(`❌ 强制删除出错: ${error.message}`);
+          const errorMessage = this.getErrorMessage(error);
+          this.logger.error(`❌ 强制删除出错: ${errorMessage}`);
           return false;
         }
       } else {
@@ -298,7 +307,9 @@ export class EnhancedDeletionService {
         return true;
       }
     } catch (error) {
-      this.logger.error(`❌ 清理处理文件失败: ${error.message}`, error.stack);
+      const errorMessage = this.getErrorMessage(error);
+      const errorStack = this.getErrorStack(error);
+      this.logger.error(`❌ 清理处理文件失败: ${errorMessage}`, errorStack);
       return false;
     }
   }
@@ -306,7 +317,7 @@ export class EnhancedDeletionService {
   /**
    * 创建删除备份
    */
-  private async createDeletionBackup(media: any): Promise<void> {
+  private async createDeletionBackup(media: MediaWithQualities): Promise<void> {
     const backupDir = path.join(process.cwd(), 'backups', 'deleted-media');
     await fs.ensureDir(backupDir);
 
@@ -387,10 +398,11 @@ export class EnhancedDeletionService {
           spaceFreed: 0,
         });
       } catch (error) {
+        const errorMessage = this.getErrorMessage(error);
         results.push({
           success: false,
           mediaId,
-          message: `软删除失败: ${error.message}`,
+          message: `软删除失败: ${errorMessage}`,
           filesDeleted: {
             mainFile: false,
             thumbnail: false,
@@ -400,7 +412,7 @@ export class EnhancedDeletionService {
             extraFiles: 0,
           },
           spaceFreed: 0,
-          error: error.message,
+          error: errorMessage,
         });
       }
     }
@@ -443,7 +455,9 @@ export class EnhancedDeletionService {
       this.logger.debug(`待硬删除媒体数量: ${pending.length}`);
       return pending;
     } catch (error) {
-      this.logger.error(`查询待硬删除媒体失败: ${error.message}`, error.stack);
+      const errorMessage = this.getErrorMessage(error);
+      const errorStack = this.getErrorStack(error);
+      this.logger.error(`查询待硬删除媒体失败: ${errorMessage}`, errorStack);
       throw error;
     }
   }
@@ -479,6 +493,17 @@ export class EnhancedDeletionService {
       createBackup: options.createBackup ?? false,
       forceDelete: options.forceDelete ?? true,
     });
+  }
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return '未知错误';
+  }
+
+  private getErrorStack(error: unknown): string | undefined {
+    return error instanceof Error ? error.stack : undefined;
   }
 }
 

@@ -7,6 +7,20 @@ import {
   VideoProcessingResult,
 } from '../services/video-processing.service';
 
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return '未知错误';
+};
+
+const getErrorStack = (error: unknown): string | undefined => {
+  return error instanceof Error ? error.stack : undefined;
+};
+
 /**
  * 视频处理队列处理器
  * 负责执行异步视频处理任务
@@ -52,13 +66,16 @@ export class VideoProcessor extends WorkerHost {
       return result;
     } catch (error) {
       this.logger.error(
-        `视频处理任务失败: ${job.id}, ${error.message}`,
-        error.stack,
+        `视频处理任务失败: ${job.id}, ${getErrorMessage(error)}`,
+        getErrorStack(error),
       );
 
       // 任务失败时记录错误
       await job.updateProgress(100);
-      throw error;
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(getErrorMessage(error));
     }
   }
 

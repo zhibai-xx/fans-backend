@@ -13,7 +13,8 @@ import {
   Logger,
   Req,
   Res,
-  Query,
+  HttpException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -38,12 +39,43 @@ import {
 } from './dto/upload.dto';
 import { Request, Response } from 'express';
 
+type AuthenticatedRequest = Request & {
+  user: {
+    id: number;
+    role?: string;
+  };
+};
+
+type UploadChunkBody = {
+  uploadId?: string;
+  chunkIndex?: string;
+  totalChunks?: string;
+};
+
+type SystemIngestFileSelection =
+  | string
+  | { path: string; name?: string; userId?: string };
+
+type BatchUploadSystemIngestBody = {
+  selectedFiles: SystemIngestFileSelection[];
+};
+
 @ApiTags('upload')
 @Controller('upload')
 export class UploadController {
   private readonly logger = new Logger(UploadController.name);
 
   constructor(private readonly uploadService: UploadService) {}
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    if (typeof error === 'string') {
+      return error;
+    }
+    return '未知错误';
+  }
 
   /**
    * 初始化上传
@@ -64,10 +96,10 @@ export class UploadController {
   @ApiResponse({ status: 401, description: '未授权' })
   async initUpload(
     @Body() dto: InitUploadDto,
-    @Req() req: Request,
+    @Req() req: AuthenticatedRequest,
   ): Promise<InitUploadResponse> {
-    const userId = (req.user as any).id;
-    const userRole = (req.user as any).role;
+    const userId = req.user.id;
+    const userRole = req.user.role;
     this.logger.log(`用户 ${userId} 初始化上传: ${dto.filename}`);
     return this.uploadService.initUpload(dto, userId, userRole);
   }
@@ -83,10 +115,10 @@ export class UploadController {
   @ApiResponse({ status: 401, description: '未授权' })
   async batchInitUpload(
     @Body() dto: BatchInitUploadDto,
-    @Req() req: Request,
+    @Req() req: AuthenticatedRequest,
   ): Promise<InitUploadResponse[]> {
-    const userId = (req.user as any).id;
-    const userRole = (req.user as any).role;
+    const userId = req.user.id;
+    const userRole = req.user.role;
     this.logger.log(
       `用户 ${userId} 批量初始化上传: ${dto.files.length} 个文件`,
     );
@@ -136,8 +168,8 @@ export class UploadController {
   @ApiResponse({ status: 404, description: '上传记录不存在' })
   async uploadChunk(
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: any,
-    @Req() req: Request,
+    @Body() body: UploadChunkBody,
+    @Req() req: AuthenticatedRequest,
   ) {
     if (!file) {
       throw new Error('未找到上传文件');
@@ -145,9 +177,9 @@ export class UploadController {
 
     // 手动构建和验证DTO，处理multipart数据的类型转换
     const dto: UploadChunkDto = {
-      uploadId: body.uploadId,
-      chunkIndex: parseInt(body.chunkIndex),
-      totalChunks: parseInt(body.totalChunks),
+      uploadId: body.uploadId ?? '',
+      chunkIndex: parseInt(body.chunkIndex ?? '', 10),
+      totalChunks: parseInt(body.totalChunks ?? '', 10),
     };
 
     // 基本验证
@@ -157,7 +189,7 @@ export class UploadController {
       );
     }
 
-    const userId = (req.user as any).id;
+    const userId = req.user.id;
     this.logger.log(
       `用户 ${userId} 上传分片: uploadId=${dto.uploadId}, chunk=${dto.chunkIndex}`,
     );
@@ -176,8 +208,11 @@ export class UploadController {
   @ApiResponse({ status: 400, description: '分片未全部上传' })
   @ApiResponse({ status: 401, description: '未授权' })
   @ApiResponse({ status: 404, description: '上传记录不存在' })
-  async mergeChunks(@Body() dto: MergeChunksDto, @Req() req: Request) {
-    const userId = (req.user as any).id;
+  async mergeChunks(
+    @Body() dto: MergeChunksDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const userId = req.user.id;
     this.logger.log(`用户 ${userId} 请求合并分片: ${dto.uploadId}`);
     return this.uploadService.mergeChunks(dto, userId);
   }
@@ -198,9 +233,9 @@ export class UploadController {
   @ApiResponse({ status: 404, description: '上传记录不存在' })
   async getUploadProgress(
     @Param('uploadId') uploadId: string,
-    @Req() req: Request,
+    @Req() req: AuthenticatedRequest,
   ): Promise<UploadProgressResponse> {
-    const userId = (req.user as any).id;
+    const userId = req.user.id;
     return this.uploadService.getUploadProgress(uploadId, userId);
   }
 
@@ -215,8 +250,11 @@ export class UploadController {
   @ApiResponse({ status: 204, description: '取消成功' })
   @ApiResponse({ status: 401, description: '未授权' })
   @ApiResponse({ status: 404, description: '上传记录不存在' })
-  async cancelUpload(@Param('uploadId') uploadId: string, @Req() req: Request) {
-    const userId = (req.user as any).id;
+  async cancelUpload(
+    @Param('uploadId') uploadId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const userId = req.user.id;
     this.logger.log(`用户 ${userId} 取消上传: ${uploadId}`);
     await this.uploadService.cancelUpload(uploadId, userId);
   }
@@ -233,11 +271,11 @@ export class UploadController {
   @ApiResponse({ status: 403, description: '需要管理员权限' })
   async scanSystemIngestFiles(
     @Body() body: { customPath?: string },
-    @Req() req: Request,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      const userId = (req.user as any).id;
-      const userRole = (req.user as any).role;
+      const userId = req.user.id;
+      const userRole = req.user.role;
       this.logger.log(
         `管理员 ${userId} (${userRole}) 扫描系统导入目录: ${body.customPath || '默认路径'}`,
       );
@@ -249,8 +287,11 @@ export class UploadController {
         data: result,
       };
     } catch (error) {
-      this.logger.error('扫描系统导入目录失败:', error);
-      throw new Error('扫描系统导入目录失败');
+      this.logger.error(`扫描系统导入目录失败: ${this.getErrorMessage(error)}`);
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new InternalServerErrorException(this.getErrorMessage(error));
     }
   }
 
@@ -270,19 +311,19 @@ export class UploadController {
   @ApiResponse({ status: 403, description: '需要管理员权限' })
   async previewSystemIngestFile(
     @Param('fileId') fileId: string,
-    @Req() req: Request,
+    @Req() req: AuthenticatedRequest,
     @Res() res: Response,
   ) {
     try {
-      const userId = (req.user as any).id;
-      const userRole = (req.user as any).role;
+      const userId = req.user.id;
+      const userRole = req.user.role;
       this.logger.log(
         `管理员 ${userId} (${userRole}) 预览系统导入文件: ${fileId}`,
       );
 
       await this.uploadService.previewSystemIngestFile(fileId, userId, res);
     } catch (error) {
-      this.logger.error('预览文件失败:', error);
+      this.logger.error(`预览文件失败: ${this.getErrorMessage(error)}`);
       res.status(404).json({ error: '文件预览失败' });
     }
   }
@@ -299,16 +340,12 @@ export class UploadController {
   @ApiResponse({ status: 403, description: '需要管理员权限' })
   async batchUploadSystemIngestFiles(
     @Body()
-    body: {
-      selectedFiles: Array<
-        string | { path: string; name?: string; userId?: string }
-      >;
-    },
-    @Req() req: Request,
+    body: BatchUploadSystemIngestBody,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      const userId = (req.user as any).id;
-      const userRole = (req.user as any).role;
+      const userId = req.user.id;
+      const userRole = req.user.role;
       this.logger.log(
         `管理员 ${userId} (${userRole}) 批量上传系统导入文件: ${body.selectedFiles.length} 个文件`,
       );
@@ -326,8 +363,11 @@ export class UploadController {
         data: result,
       };
     } catch (error) {
-      this.logger.error('批量上传失败:', error);
-      throw new Error('批量上传失败');
+      this.logger.error(`批量上传失败: ${this.getErrorMessage(error)}`);
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new InternalServerErrorException(this.getErrorMessage(error));
     }
   }
 }

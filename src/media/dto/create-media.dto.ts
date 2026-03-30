@@ -28,12 +28,9 @@ export class CreateMediaDto {
    * 分类ID（可选） - 自动转换空字符串为undefined
    */
   @Transform(({ value }) => {
-    if (value === '' || value === null) {
-      return undefined;
-    }
-    return value;
+    return normalizeOptionalUuid(value);
   })
-  @ValidateIf((o) => o.category_id !== undefined)
+  @ValidateIf((dto: CreateMediaDto) => dto.category_id !== undefined)
   @IsUUID()
   category_id?: string;
 
@@ -51,4 +48,12 @@ export class CreateMediaDto {
   @IsUUID(4, { each: true })
   @IsOptional()
   tags?: string[];
+}
+
+function normalizeOptionalUuid(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }

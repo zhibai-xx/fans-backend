@@ -5,9 +5,10 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  SetMetadata,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 
 /**
  * 速率限制配置接口
@@ -29,6 +30,10 @@ interface RequestRecord {
   blocked: boolean;
   blockedUntil?: number;
 }
+
+type AuthenticatedRequest = Request & {
+  user?: { id?: number | string };
+};
 
 /**
  * API速率限制守卫
@@ -81,9 +86,9 @@ export class RateLimitGuard implements CanActivate {
   /**
    * 守卫主要逻辑
    */
-  async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest<Request>();
-    const response = context.switchToHttp().getResponse();
+  canActivate(context: ExecutionContext): boolean {
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
+    const response = context.switchToHttp().getResponse<Response>();
 
     // 获取速率限制配置
     const config = this.getRateLimitConfig(context);
@@ -212,8 +217,8 @@ export class RateLimitGuard implements CanActivate {
    */
   private getClientKey(req: Request): string {
     // 优先使用用户ID（如果已认证）
-    const user = (req as any).user;
-    if (user && user.id) {
+    const user = (req as AuthenticatedRequest).user;
+    if (user?.id) {
       return `user:${user.id}`;
     }
 
@@ -226,13 +231,26 @@ export class RateLimitGuard implements CanActivate {
    * 获取客户端IP地址
    */
   private getClientIp(req: Request): string {
+    const forwarded = this.getHeaderValue(req, 'x-forwarded-for');
+    const realIp = this.getHeaderValue(req, 'x-real-ip');
     return (
-      (req.headers['x-forwarded-for'] as string) ||
-      (req.headers['x-real-ip'] as string) ||
+      forwarded ||
+      realIp ||
       req.connection.remoteAddress ||
       req.socket.remoteAddress ||
       'unknown'
     );
+  }
+
+  private getHeaderValue(req: Request, key: string): string | undefined {
+    const value = req.headers[key];
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      return value[0];
+    }
+    return undefined;
   }
 
   /**
@@ -357,13 +375,11 @@ export class RateLimitGuard implements CanActivate {
    */
   getStats() {
     const now = Date.now();
-    const activeRecords = Array.from(this.requestRecords.entries()).filter(
-      ([_, record]) => now <= record.resetTime || record.blocked,
+    const activeRecords = Array.from(this.requestRecords.values()).filter(
+      (record) => now <= record.resetTime || record.blocked,
     );
 
-    const blockedClients = activeRecords.filter(
-      ([_, record]) => record.blocked,
-    );
+    const blockedClients = activeRecords.filter((record) => record.blocked);
     const violations = Array.from(this.violationRecords.entries());
 
     return {
@@ -397,7 +413,5 @@ export class RateLimitGuard implements CanActivate {
  * 速率限制装饰器
  */
 export const RateLimit = (config: Partial<RateLimitConfig>) => {
-  return (target: any, propertyKey: string, descriptor: PropertyDescriptor) => {
-    Reflect.defineMetadata('rateLimit', config, descriptor.value);
-  };
+  return SetMetadata('rateLimit', config);
 };

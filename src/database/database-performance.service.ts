@@ -24,11 +24,53 @@ export interface PerformanceReport {
   slowQueries: QueryMetrics[]; // 慢查询列表
   averageQueryTime: number; // 平均查询时间
   queryCount: number; // 查询总数
-  connectionPoolStats: any; // 连接池状态
-  indexUsage: any[]; // 索引使用情况
-  tableStats: any[]; // 表统计信息
+  connectionPoolStats: ConnectionPoolStats | null; // 连接池状态
+  indexUsage: IndexUsage[]; // 索引使用情况
+  tableStats: TableStats[]; // 表统计信息
   recommendations: string[]; // 优化建议
 }
+
+type NumericValue = number | string | bigint;
+
+type ConnectionPoolStats = {
+  total_connections: NumericValue;
+  active_connections: NumericValue;
+  idle_connections: NumericValue;
+  idle_in_transaction?: NumericValue;
+};
+
+type IndexUsage = {
+  schemaname?: string;
+  tablename?: string;
+  indexname?: string;
+  scans: number;
+  tuples_read?: number;
+  tuples_fetched?: number;
+};
+
+type TableStats = {
+  schemaname?: string;
+  tablename?: string;
+  inserts?: number;
+  updates?: number;
+  deletes?: number;
+  live_tuples?: number;
+  dead_tuples: number;
+};
+
+type DatabaseStats = {
+  tables: TableStats[];
+  indexes: IndexUsage[];
+  timestamp: Date;
+};
+
+type SerializableValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: SerializableValue }
+  | SerializableValue[];
 
 /**
  * 数据库性能监控服务
@@ -113,12 +155,13 @@ export class DatabasePerformanceService {
       this.getConnectionPoolStats(),
       this.databaseService.getStats(),
     ]);
+    const normalizedStats = this.normalizeDatabaseStats(dbStats);
 
     // 基于性能数据生成针对性的优化建议
     const recommendations = this.generateRecommendations(
       slowQueries,
       averageQueryTime,
-      dbStats,
+      normalizedStats,
     );
 
     return {
@@ -126,8 +169,8 @@ export class DatabasePerformanceService {
       averageQueryTime,
       queryCount: recentQueries.length,
       connectionPoolStats,
-      indexUsage: (dbStats?.indexes || []) as any[],
-      tableStats: (dbStats?.tables || []) as any[],
+      indexUsage: normalizedStats.indexes,
+      tableStats: normalizedStats.tables,
       recommendations,
     };
   }
@@ -137,7 +180,9 @@ export class DatabasePerformanceService {
    */
   private async getConnectionPoolStats() {
     try {
-      const result = await this.databaseService.$queryRaw`
+      const result = await this.databaseService.$queryRaw<
+        ConnectionPoolStats[]
+      >`
         SELECT 
           COUNT(*) as total_connections,
           COUNT(CASE WHEN state = 'active' THEN 1 END) as active_connections,
@@ -147,7 +192,7 @@ export class DatabasePerformanceService {
         WHERE datname = current_database()
       `;
 
-      return (result as any[])[0];
+      return result[0] ?? null;
     } catch (error) {
       this.logger.error('获取连接池状态失败:', error);
       return null;
@@ -160,7 +205,7 @@ export class DatabasePerformanceService {
   private generateRecommendations(
     slowQueries: QueryMetrics[],
     averageQueryTime: number,
-    dbStats: any,
+    dbStats: DatabaseStats,
   ): string[] {
     const recommendations: string[] = [];
 
@@ -180,7 +225,7 @@ export class DatabasePerformanceService {
 
     // 索引使用建议
     const lowUsageIndexes = dbStats.indexes.filter(
-      (index: any) => index.scans < 100,
+      (index) => index.scans < 100,
     );
     if (lowUsageIndexes.length > 0) {
       recommendations.push(
@@ -190,7 +235,7 @@ export class DatabasePerformanceService {
 
     // 表统计建议
     const tablesWithDeadTuples = dbStats.tables.filter(
-      (table: any) => table.dead_tuples > 1000,
+      (table) => table.dead_tuples > 1000,
     );
     if (tablesWithDeadTuples.length > 0) {
       recommendations.push(
@@ -204,9 +249,9 @@ export class DatabasePerformanceService {
   /**
    * 转换BigInt为字符串，解决JSON序列化问题
    */
-  private convertBigIntToString(data: any): any {
+  private convertBigIntToString(data: unknown): SerializableValue {
     if (data === null || data === undefined) {
-      return data;
+      return null;
     }
 
     if (typeof data === 'bigint') {
@@ -218,14 +263,21 @@ export class DatabasePerformanceService {
     }
 
     if (typeof data === 'object') {
-      const result: any = {};
+      const result: Record<string, SerializableValue> = {};
       for (const [key, value] of Object.entries(data)) {
         result[key] = this.convertBigIntToString(value);
       }
       return result;
     }
 
-    return data;
+    if (typeof data === 'number' || typeof data === 'string') {
+      return data;
+    }
+    if (typeof data === 'boolean') {
+      return data;
+    }
+
+    return null;
   }
 
   /**
@@ -234,7 +286,14 @@ export class DatabasePerformanceService {
   async getOptimizationSuggestions() {
     try {
       // 获取未使用的索引
-      const unusedIndexes = await this.databaseService.$queryRaw`
+      const unusedIndexes = await this.databaseService.$queryRaw<
+        Array<{
+          schemaname: string;
+          tablename: string;
+          indexname: string;
+          idx_scan: NumericValue;
+        }>
+      >`
         SELECT 
           schemaname,
           relname as tablename,
@@ -246,7 +305,13 @@ export class DatabasePerformanceService {
       `;
 
       // 获取重复索引
-      const duplicateIndexes = await this.databaseService.$queryRaw`
+      const duplicateIndexes = await this.databaseService.$queryRaw<
+        Array<{
+          schemaname: string;
+          tablename: string;
+          duplicate_indexes: string[];
+        }>
+      >`
         SELECT 
           t.schemaname,
           t.tablename,
@@ -258,7 +323,15 @@ export class DatabasePerformanceService {
       `;
 
       // 获取表膨胀信息
-      const tablesBloat = await this.databaseService.$queryRaw`
+      const tablesBloat = await this.databaseService.$queryRaw<
+        Array<{
+          schemaname: string;
+          tablename: string;
+          dead_tuples: NumericValue;
+          live_tuples: NumericValue;
+          bloat_ratio: number;
+        }>
+      >`
         SELECT 
           schemaname,
           relname as tablename,
@@ -273,13 +346,28 @@ export class DatabasePerformanceService {
         WHERE n_dead_tup > 0
         ORDER BY bloat_ratio DESC
       `;
+      const tablesBloatRaw = this.convertBigIntToString(tablesBloat);
+      const tablesBloatList = Array.isArray(tablesBloatRaw)
+        ? tablesBloatRaw
+        : [];
+      const tablesBloatFiltered = tablesBloatList.filter((table) => {
+        if (!this.isRecord(table)) {
+          return false;
+        }
+        const ratioValue = table.bloat_ratio;
+        if (typeof ratioValue === 'number') {
+          return ratioValue > 10;
+        }
+        if (typeof ratioValue === 'string') {
+          return Number(ratioValue) > 10;
+        }
+        return false;
+      });
 
       return {
         unusedIndexes: this.convertBigIntToString(unusedIndexes),
         duplicateIndexes: this.convertBigIntToString(duplicateIndexes),
-        tablesBloat: this.convertBigIntToString(
-          (tablesBloat as any[]).filter((table: any) => table.bloat_ratio > 10),
-        ),
+        tablesBloat: tablesBloatFiltered,
         timestamp: new Date(),
       };
     } catch (error) {
@@ -332,5 +420,86 @@ export class DatabasePerformanceService {
         .slice(0, 5),
       timestamp: new Date(),
     };
+  }
+
+  private normalizeDatabaseStats(stats: unknown): DatabaseStats {
+    if (!stats || typeof stats !== 'object') {
+      return { tables: [], indexes: [], timestamp: new Date() };
+    }
+    const record = stats as Record<string, unknown>;
+    const rawTables = Array.isArray(record.tables) ? record.tables : [];
+    const rawIndexes = Array.isArray(record.indexes) ? record.indexes : [];
+    const tables = rawTables
+      .map((table) => this.parseTableStats(table))
+      .filter((table): table is TableStats => table !== null);
+    const indexes = rawIndexes
+      .map((index) => this.parseIndexUsage(index))
+      .filter((index): index is IndexUsage => index !== null);
+    return {
+      tables,
+      indexes,
+      timestamp:
+        record.timestamp instanceof Date ? record.timestamp : new Date(),
+    };
+  }
+
+  private parseIndexUsage(value: unknown): IndexUsage | null {
+    if (!this.isRecord(value)) {
+      return null;
+    }
+    return {
+      schemaname: this.asString(value.schemaname),
+      tablename: this.asString(value.tablename),
+      indexname: this.asString(value.indexname),
+      scans: this.asNumber(value.scans),
+      tuples_read: this.asNumberOptional(value.tuples_read),
+      tuples_fetched: this.asNumberOptional(value.tuples_fetched),
+    };
+  }
+
+  private parseTableStats(value: unknown): TableStats | null {
+    if (!this.isRecord(value)) {
+      return null;
+    }
+    return {
+      schemaname: this.asString(value.schemaname),
+      tablename: this.asString(value.tablename),
+      inserts: this.asNumberOptional(value.inserts),
+      updates: this.asNumberOptional(value.updates),
+      deletes: this.asNumberOptional(value.deletes),
+      live_tuples: this.asNumberOptional(value.live_tuples),
+      dead_tuples: this.asNumber(value.dead_tuples),
+    };
+  }
+
+  private asNumberOptional(
+    value: SerializableValue | undefined,
+  ): number | undefined {
+    const numberValue = this.asNumber(value);
+    return Number.isNaN(numberValue) ? undefined : numberValue;
+  }
+
+  private asNumber(value: SerializableValue | undefined): number {
+    if (typeof value === 'number') {
+      return value;
+    }
+    if (typeof value === 'string') {
+      return Number(value);
+    }
+    if (typeof value === 'bigint') {
+      return Number(value);
+    }
+    return 0;
+  }
+
+  private asString(value: SerializableValue | undefined): string | undefined {
+    if (typeof value === 'string') {
+      return value;
+    }
+    return undefined;
+  }
+
+  private isRecord(value: unknown): value is Record<string, SerializableValue> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 }

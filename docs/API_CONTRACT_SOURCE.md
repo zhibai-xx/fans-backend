@@ -44,6 +44,12 @@
 - 在 tests/ 中保留契约快照测试, 确保 message 字段类型保持字符串
 - 对 multipart/form-data 与分片上传接口标注 file schema 与 50MB 限制
 - 登录接口固定为 /api/users/login, 契约描述中强调认证流程
+- 认证令牌策略：
+- `/api/users/login` 返回 `access_token` 与 `refresh_token`
+- `/api/users/refresh-token` 接收 `refresh_token` 并换发新 token 对
+- `/api/users/logout`（JWT）用于主动失效当前会话
+- access token 默认 15 分钟，refresh token 默认 30 天（可由环境变量覆盖）
+- token 载荷包含 `sessionVersion`，后端按用户会话版本校验，版本不一致即返回未授权
 
 ## 交付物
 - docs/ 中保存版本化的契约说明或变更日志

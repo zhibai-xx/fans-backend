@@ -78,12 +78,16 @@ export class UploadChunkDto {
   uploadId: string;
 
   @ApiProperty({ description: '分片索引' })
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }: { value: unknown }) =>
+    Number.parseInt(String(value), 10),
+  )
   @IsNumber()
   chunkIndex: number;
 
   @ApiProperty({ description: '总分片数' })
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }: { value: unknown }) =>
+    Number.parseInt(String(value), 10),
+  )
   @IsNumber()
   totalChunks: number;
 }

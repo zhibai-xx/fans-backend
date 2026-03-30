@@ -138,18 +138,41 @@ export class ReviewFilterDto {
   @IsOptional()
   @IsInt()
   @Min(0)
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => parseNumberValue(value, 0))
   skip?: number;
 
   @ApiProperty({ description: '获取条数', minimum: 1, required: false })
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => parseNumberValue(value, 20))
   take?: number;
 }
 
+function parseNumberValue(value: unknown, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.floor(value);
+  }
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
 // 审核统计响应DTO
+type ReviewStatsSource = Partial<{
+  total: number;
+  pending: number;
+  approved: number;
+  rejected: number;
+  private: number;
+  images: number;
+  videos: number;
+  todayPending: number;
+  todayReviewed: number;
+}>;
+
 export class ReviewStatsDto {
   @ApiProperty({ description: '总媒体数' })
   total: number;
@@ -178,7 +201,7 @@ export class ReviewStatsDto {
   @ApiProperty({ description: '今日已审核数量' })
   todayReviewed: number;
 
-  constructor(data: any) {
+  constructor(data: ReviewStatsSource) {
     this.total = data.total || 0;
     this.pending = data.pending || 0;
     this.approved = data.approved || 0;

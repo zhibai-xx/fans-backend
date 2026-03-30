@@ -2,18 +2,13 @@ import { Injectable, NestMiddleware } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { DatabaseService } from 'src/database/database.service';
 
-/**
- * 为Request对象扩展类型，添加user属性
- */
-declare global {
-  namespace Express {
-    interface Request {
-      user?: {
-        id: number;
-        username: string;
-        role: string;
-      };
-    }
+declare module 'express-serve-static-core' {
+  interface Request {
+    user?: {
+      id: number;
+      username: string;
+      role: string;
+    };
   }
 }
 

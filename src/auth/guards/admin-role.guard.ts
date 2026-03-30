@@ -6,6 +6,17 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
+import { Request } from 'express';
+
+type AuthenticatedUser = {
+  id: number;
+  username: string;
+  role: string;
+};
+
+type RequestWithUser = Request & {
+  user?: AuthenticatedUser;
+};
 
 @Injectable()
 export class AdminRoleGuard implements CanActivate {
@@ -14,7 +25,7 @@ export class AdminRoleGuard implements CanActivate {
   canActivate(
     context: ExecutionContext,
   ): boolean | Promise<boolean> | Observable<boolean> {
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<RequestWithUser>();
     const user = request.user;
 
     this.logger.debug(

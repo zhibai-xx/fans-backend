@@ -47,9 +47,9 @@ CREATE DATABASE fans_db;
 ```
 
 ### 3. 环境变量配置
-复制 `env.example` 为 `.env` 并填入正确的配置：
+复制 `.env.example` 为 `.env` 并填入正确的配置：
 ```bash
-cp env.example .env
+cp .env.example .env
 ```
 
 ### 4. 数据库迁移

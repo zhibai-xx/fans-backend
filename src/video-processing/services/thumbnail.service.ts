@@ -13,8 +13,98 @@ import * as fs from 'fs-extra';
  * - VTT字幕文件生成
  * - 预览缩略图管理
  */
+type CoverOptions = {
+  timeOffset?: number;
+  width?: number;
+  height?: number;
+  quality?: number;
+};
+
+type PreviewOptions = {
+  count?: number;
+  interval?: number;
+  width?: number;
+  height?: number;
+  startOffset?: number;
+};
+
+type SpriteOptions = {
+  interval?: number;
+  thumbWidth?: number;
+  thumbHeight?: number;
+  columns?: number;
+  maxThumbnails?: number;
+  quality?: number;
+};
+
+type KeyFrameOptions = {
+  maxKeyFrames?: number;
+  width?: number;
+  height?: number;
+  minInterval?: number;
+};
+
+type BatchThumbnailRequest =
+  | {
+      videoPath: string;
+      outputPath: string;
+      type: 'cover';
+      options?: CoverOptions;
+    }
+  | {
+      videoPath: string;
+      outputPath: string;
+      type: 'preview';
+      options?: PreviewOptions;
+    }
+  | {
+      videoPath: string;
+      outputPath: string;
+      type: 'sprite';
+      options?: SpriteOptions;
+    }
+  | {
+      videoPath: string;
+      outputPath: string;
+      type: 'keyframe';
+      options?: KeyFrameOptions;
+    };
+
+type BatchThumbnailResult =
+  | string
+  | { thumbnails: string[]; count: number; interval: number }
+  | {
+      spriteImage: string;
+      vttFile: string;
+      thumbnailInfo: {
+        count: number;
+        interval: number;
+        spriteWidth: number;
+        spriteHeight: number;
+        thumbWidth: number;
+        thumbHeight: number;
+        columns: number;
+        rows: number;
+      };
+    }
+  | { keyFrames: string[]; timestamps: number[] };
+
 @Injectable()
 export class ThumbnailService {
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    if (typeof error === 'string') {
+      return error;
+    }
+    return '未知错误';
+  }
+
+  private getErrorStack(error: unknown): string | undefined {
+    return error instanceof Error ? error.stack : undefined;
+  }
+
   private readonly logger = new Logger(ThumbnailService.name);
 
   constructor(private readonly ffmpegService: FFmpegService) {}
@@ -92,8 +182,15 @@ export class ThumbnailService {
       this.logger.log(`✅ 快速封面生成完成: ${outputPath}`);
       return outputPath;
     } catch (error) {
-      this.logger.error(`❌ 快速封面生成失败: ${error.message}`, error.stack);
-      throw error;
+      const message = this.getErrorMessage(error);
+      this.logger.error(
+        `❌ 快速封面生成失败: ${message}`,
+        this.getErrorStack(error),
+      );
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(message);
     }
   }
 
@@ -120,6 +217,7 @@ export class ThumbnailService {
       height = 720,
       quality = 85,
     } = options;
+    void quality;
 
     this.logger.log(`生成视频封面图: ${videoPath} -> ${outputPath}`);
 
@@ -150,8 +248,12 @@ export class ThumbnailService {
       this.logger.log(`视频封面图生成完成: ${thumbnails[0]}`);
       return thumbnails[0];
     } catch (error) {
-      this.logger.error(`生成视频封面图失败: ${error.message}`, error.stack);
-      throw new Error(`生成视频封面图失败: ${error.message}`);
+      const message = this.getErrorMessage(error);
+      this.logger.error(
+        `生成视频封面图失败: ${message}`,
+        this.getErrorStack(error),
+      );
+      throw new Error(`生成视频封面图失败: ${message}`);
     }
   }
 
@@ -228,11 +330,12 @@ export class ThumbnailService {
         interval: actualInterval,
       };
     } catch (error) {
+      const message = this.getErrorMessage(error);
       this.logger.error(
-        `生成视频预览缩略图集失败: ${error.message}`,
-        error.stack,
+        `生成视频预览缩略图集失败: ${message}`,
+        this.getErrorStack(error),
       );
-      throw new Error(`生成视频预览缩略图集失败: ${error.message}`);
+      throw new Error(`生成视频预览缩略图集失败: ${message}`);
     }
   }
 
@@ -276,6 +379,8 @@ export class ThumbnailService {
       maxThumbnails = 100,
       quality = 80,
     } = options;
+    void maxThumbnails;
+    void quality;
 
     this.logger.log(`生成视频预览精灵图: ${videoPath} -> ${outputDir}`);
 
@@ -285,7 +390,6 @@ export class ThumbnailService {
 
       // 输出文件路径
       const spriteImage = path.join(outputDir, 'thumbnails-sprite.jpg');
-      const vttFile = path.join(outputDir, 'thumbnails.vtt');
 
       // 使用FFmpegService生成精灵图
       const result = await this.ffmpegService.generateSpriteImage(
@@ -326,11 +430,12 @@ export class ThumbnailService {
         thumbnailInfo,
       };
     } catch (error) {
+      const message = this.getErrorMessage(error);
       this.logger.error(
-        `生成视频预览精灵图失败: ${error.message}`,
-        error.stack,
+        `生成视频预览精灵图失败: ${message}`,
+        this.getErrorStack(error),
       );
-      throw new Error(`生成视频预览精灵图失败: ${error.message}`);
+      throw new Error(`生成视频预览精灵图失败: ${message}`);
     }
   }
 
@@ -403,8 +508,12 @@ export class ThumbnailService {
       this.logger.log(`关键帧缩略图生成完成: ${keyFrames.length}张`);
       return { keyFrames, timestamps };
     } catch (error) {
-      this.logger.error(`生成关键帧缩略图失败: ${error.message}`, error.stack);
-      throw new Error(`生成关键帧缩略图失败: ${error.message}`);
+      const message = this.getErrorMessage(error);
+      this.logger.error(
+        `生成关键帧缩略图失败: ${message}`,
+        this.getErrorStack(error),
+      );
+      throw new Error(`生成关键帧缩略图失败: ${message}`);
     }
   }
 
@@ -414,21 +523,21 @@ export class ThumbnailService {
    * @returns Promise<Array<{success: boolean, result?: any, error?: string}>>
    */
   async generateBatchThumbnails(
-    requests: Array<{
-      videoPath: string;
-      outputPath: string;
-      type: 'cover' | 'preview' | 'sprite' | 'keyframe';
-      options?: any;
-    }>,
-  ): Promise<Array<{ success: boolean; result?: any; error?: string }>> {
+    requests: BatchThumbnailRequest[],
+  ): Promise<
+    Array<{ success: boolean; result?: BatchThumbnailResult; error?: string }>
+  > {
     this.logger.log(`批量生成缩略图: ${requests.length} 个请求`);
 
-    const results: Array<{ success: boolean; result?: any; error?: string }> =
-      [];
+    const results: Array<{
+      success: boolean;
+      result?: BatchThumbnailResult;
+      error?: string;
+    }> = [];
 
     for (const request of requests) {
       try {
-        let result: any;
+        let result: BatchThumbnailResult;
 
         switch (request.type) {
           case 'cover':
@@ -464,15 +573,14 @@ export class ThumbnailService {
             break;
 
           default:
-            throw new Error(`未知的缩略图类型: ${request.type}`);
+            throw new Error('未知的缩略图类型');
         }
 
         results.push({ success: true, result });
       } catch (error) {
-        this.logger.error(
-          `批量生成缩略图失败 - ${request.type}: ${error.message}`,
-        );
-        results.push({ success: false, error: error.message });
+        const message = this.getErrorMessage(error);
+        this.logger.error(`批量生成缩略图失败 - ${request.type}: ${message}`);
+        results.push({ success: false, error: message });
       }
     }
 
@@ -537,7 +645,11 @@ export class ThumbnailService {
       );
       return { deletedFiles, freedSpace };
     } catch (error) {
-      this.logger.error(`清理缩略图文件失败: ${error.message}`, error.stack);
+      const message = this.getErrorMessage(error);
+      this.logger.error(
+        `清理缩略图文件失败: ${message}`,
+        this.getErrorStack(error),
+      );
       return { deletedFiles: 0, freedSpace: 0 };
     }
   }

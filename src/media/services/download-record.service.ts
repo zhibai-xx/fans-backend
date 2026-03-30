@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Media, MediaType } from '@prisma/client';
+import { Media } from '@prisma/client';
 import { DatabaseService } from 'src/database/database.service';
 import {
   DownloadRecordDto,

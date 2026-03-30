@@ -10,6 +10,20 @@ import { exec } from 'child_process';
 
 const execAsync = promisify(exec);
 
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return '未知错误';
+};
+
+const getErrorStack = (error: unknown): string | undefined => {
+  return error instanceof Error ? error.stack : undefined;
+};
+
 export interface DashboardStats {
   users: {
     total: number;
@@ -93,7 +107,7 @@ export class AdminDashboardService {
         system: systemStats,
       };
     } catch (error) {
-      this.logger.error('获取管理面板统计数据失败', error.stack);
+      this.logger.error('获取管理面板统计数据失败', getErrorStack(error));
       throw error;
     }
   }
@@ -232,7 +246,6 @@ export class AdminDashboardService {
         const parts = stdout.trim().split(/\s+/);
         if (parts.length >= 5) {
           const totalStr = parts[1]; // "466Gi"
-          const usedStr = parts[2]; // "15Gi"
           const capacityStr = parts[4]; // "4%"
 
           const usedPercent = parseInt(capacityStr.replace('%', ''));
@@ -260,7 +273,10 @@ export class AdminDashboardService {
       // 后备方案：基于项目目录估算
       return this.getProjectSizeEstimate();
     } catch (error) {
-      this.logger.warn('获取磁盘使用情况失败，使用估算值:', error.message);
+      this.logger.warn(
+        '获取磁盘使用情况失败，使用估算值:',
+        getErrorMessage(error),
+      );
       return this.getProjectSizeEstimate();
     }
   }
@@ -314,7 +330,9 @@ export class AdminDashboardService {
       try {
         const frontendStats = this.getDirectorySize(projectPath);
         projectSize += frontendStats;
-      } catch (e) {}
+      } catch (_error) {
+        void _error;
+      }
 
       // 估算后端项目大小
       try {
@@ -322,7 +340,9 @@ export class AdminDashboardService {
           const backendStats = this.getDirectorySize(backendPath);
           projectSize += backendStats;
         }
-      } catch (e) {}
+      } catch (_error) {
+        void _error;
+      }
 
       // 基于项目大小估算磁盘情况
       const projectSizeGB = projectSize / (1024 * 1024 * 1024);
@@ -336,7 +356,8 @@ export class AdminDashboardService {
         usedPercent: Math.round(estimatedUsedPercent * 100) / 100,
         totalGB: estimatedTotalGB,
       };
-    } catch (error) {
+    } catch (_error) {
+      void _error;
       return { usedPercent: 68.5, totalGB: 500 }; // 本地开发环境的合理估算
     }
   }
@@ -357,13 +378,14 @@ export class AdminDashboardService {
           if (stats.isFile()) {
             totalSize += stats.size;
           }
-        } catch (e) {
-          // 忽略无法访问的文件
+        } catch (error) {
+          void error;
         }
       }
 
       return totalSize;
-    } catch (error) {
+    } catch (_error) {
+      void _error;
       return 0;
     }
   }
@@ -388,8 +410,8 @@ export class AdminDashboardService {
           const stats = fs.statSync(path);
           return this.formatTimeAgo(stats.mtime);
         }
-      } catch (e) {
-        // 忽略错误
+      } catch (_error) {
+        void _error;
       }
     }
 
@@ -463,7 +485,7 @@ export class AdminDashboardService {
         )
         .slice(0, 10);
     } catch (error) {
-      this.logger.error('获取近期活动失败', error.stack);
+      this.logger.error('获取近期活动失败', getErrorStack(error));
       return [];
     }
   }
@@ -482,7 +504,8 @@ export class AdminDashboardService {
       let databaseStatus: 'healthy' | 'warning' | 'error' = 'healthy';
       try {
         await this.databaseService.$queryRaw`SELECT 1`;
-      } catch (error) {
+      } catch (_error) {
+        void _error;
         databaseStatus = 'error';
       }
 
@@ -493,7 +516,7 @@ export class AdminDashboardService {
         cpu: cpuUsage > 80 ? 'warning' : 'healthy',
       };
     } catch (error) {
-      this.logger.error('获取系统状态失败', error.stack);
+      this.logger.error('获取系统状态失败', getErrorStack(error));
       return {
         database: 'error',
         storage: 'error',

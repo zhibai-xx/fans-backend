@@ -30,7 +30,7 @@ import {
 } from '../dto/comment.dto';
 
 type RequestWithUser = ExpressRequest & {
-  user: { id: number; [key: string]: any };
+  user: { id: number; [key: string]: unknown };
 };
 
 @ApiTags('媒体留言')

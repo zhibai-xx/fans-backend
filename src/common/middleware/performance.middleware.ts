@@ -63,7 +63,8 @@ export class PerformanceMiddleware implements NestMiddleware {
       }
     } catch (error) {
       // 静默处理缓存头部设置错误，不影响正常响应
-      this.logger.warn('Failed to set cache headers:', error.message);
+      const message = error instanceof Error ? error.message : '未知错误';
+      this.logger.warn(`Failed to set cache headers: ${message}`);
     }
   }
 }

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { UserService } from './services/user.service';
@@ -9,15 +10,25 @@ import { AdminUserController } from './controllers/admin-user.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { DatabaseModule } from 'src/database/database.module';
 import { LogsModule } from 'src/logs/logs.module';
+import {
+  getAccessTokenExpiresIn,
+  getJwtSecretOrThrow,
+} from 'src/config/security.config';
 
 @Module({
   imports: [
     DatabaseModule,
     LogsModule,
     PassportModule,
-    JwtModule.register({
-      secret: process.env.JWT_SECRET || 'your-secret-key',
-      signOptions: { expiresIn: '30d' },
+    JwtModule.registerAsync({
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => {
+        void configService;
+        return {
+          secret: getJwtSecretOrThrow(),
+          signOptions: { expiresIn: getAccessTokenExpiresIn() },
+        };
+      },
     }),
   ],
   controllers: [UserController, AdminUserController],

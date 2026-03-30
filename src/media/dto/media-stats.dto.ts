@@ -1,5 +1,50 @@
 import { ApiProperty } from '@nestjs/swagger';
 
+type MediaStatsInput = {
+  id: string;
+  title: string;
+  views?: number | null;
+  likes_count?: number | null;
+  favorites_count?: number | null;
+  _count?: {
+    comments?: number | null;
+  };
+};
+
+type GlobalStatsInput = {
+  total_media?: number | null;
+  total_views?: number | null;
+  total_likes?: number | null;
+  total_favorites?: number | null;
+  total_comments?: number | null;
+  active_users?: number | null;
+};
+
+type UploadedMediaStats = {
+  likes_count?: number | null;
+  favorites_count?: number | null;
+};
+
+type UserStatsInput = {
+  username: string;
+  uploaded_media?: UploadedMediaStats[] | null;
+  _count?: {
+    uploaded_media?: number | null;
+    likes?: number | null;
+    favorites?: number | null;
+    comments?: number | null;
+  };
+};
+
+type PeriodStatsInput = {
+  date: string;
+  new_media?: number | null;
+  new_likes?: number | null;
+  new_favorites?: number | null;
+  new_comments?: number | null;
+  views?: number | null;
+};
+
 /**
  * 媒体统计信息DTO
  */
@@ -25,13 +70,13 @@ export class MediaStatsDto {
   @ApiProperty({ description: '互动率（点赞+收藏+评论）/观看次数' })
   engagement_rate: number;
 
-  constructor(data: any) {
+  constructor(data: MediaStatsInput) {
     this.media_id = data.id;
     this.title = data.title;
-    this.views = data.views || 0;
-    this.likes_count = data.likes_count || 0;
-    this.favorites_count = data.favorites_count || 0;
-    this.comments_count = data._count?.comments || 0;
+    this.views = data.views ?? 0;
+    this.likes_count = data.likes_count ?? 0;
+    this.favorites_count = data.favorites_count ?? 0;
+    this.comments_count = data._count?.comments ?? 0;
 
     // 计算互动率
     const totalInteractions =
@@ -68,13 +113,13 @@ export class GlobalStatsDto {
   @ApiProperty({ description: '平均互动率' })
   avg_engagement_rate: number;
 
-  constructor(data: any) {
-    this.total_media = data.total_media || 0;
-    this.total_views = data.total_views || 0;
-    this.total_likes = data.total_likes || 0;
-    this.total_favorites = data.total_favorites || 0;
-    this.total_comments = data.total_comments || 0;
-    this.active_users = data.active_users || 0;
+  constructor(data: GlobalStatsInput) {
+    this.total_media = data.total_media ?? 0;
+    this.total_views = data.total_views ?? 0;
+    this.total_likes = data.total_likes ?? 0;
+    this.total_favorites = data.total_favorites ?? 0;
+    this.total_comments = data.total_comments ?? 0;
+    this.active_users = data.active_users ?? 0;
 
     // 计算平均互动率
     const totalInteractions =
@@ -114,23 +159,23 @@ export class UserStatsDto {
   @ApiProperty({ description: '评论数' })
   comments_count: number;
 
-  constructor(data: any, userUuid: string) {
+  constructor(data: UserStatsInput, userUuid: string) {
     this.user_uuid = userUuid;
     this.username = data.username;
-    this.uploaded_media = data._count?.uploaded_media || 0;
+    this.uploaded_media = data._count?.uploaded_media ?? 0;
     this.received_likes =
       data.uploaded_media?.reduce(
-        (sum: number, media: any) => sum + (media.likes_count || 0),
+        (sum, media) => sum + (media.likes_count ?? 0),
         0,
       ) || 0;
     this.received_favorites =
       data.uploaded_media?.reduce(
-        (sum: number, media: any) => sum + (media.favorites_count || 0),
+        (sum, media) => sum + (media.favorites_count ?? 0),
         0,
       ) || 0;
-    this.given_likes = data._count?.likes || 0;
-    this.given_favorites = data._count?.favorites || 0;
-    this.comments_count = data._count?.comments || 0;
+    this.given_likes = data._count?.likes ?? 0;
+    this.given_favorites = data._count?.favorites ?? 0;
+    this.comments_count = data._count?.comments ?? 0;
   }
 }
 
@@ -156,13 +201,13 @@ export class PeriodStatsDto {
   @ApiProperty({ description: '观看次数' })
   views: number;
 
-  constructor(data: any) {
+  constructor(data: PeriodStatsInput) {
     this.date = data.date;
-    this.new_media = data.new_media || 0;
-    this.new_likes = data.new_likes || 0;
-    this.new_favorites = data.new_favorites || 0;
-    this.new_comments = data.new_comments || 0;
-    this.views = data.views || 0;
+    this.new_media = data.new_media ?? 0;
+    this.new_likes = data.new_likes ?? 0;
+    this.new_favorites = data.new_favorites ?? 0;
+    this.new_comments = data.new_comments ?? 0;
+    this.views = data.views ?? 0;
   }
 }
 

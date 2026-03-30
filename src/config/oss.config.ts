@@ -1,5 +1,3 @@
-import { registerAs } from '@nestjs/config';
-
 /**
  * 阿里云OSS配置
  * 提供阿里云OSS的访问凭证和存储配置

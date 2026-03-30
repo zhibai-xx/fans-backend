@@ -2,10 +2,11 @@ import {
   Body,
   Controller,
   Get,
+  HttpException,
+  HttpStatus,
   Param,
   Post,
   Put,
-  Request,
   Req,
   UploadedFile,
   UseGuards,
@@ -17,6 +18,7 @@ import { RegisterDto } from '../dto/register.dto';
 import { LoginDto } from '../dto/login.dto';
 import { UpdateUserDto } from '../dto/update-user.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
+import { RefreshTokenDto } from '../dto/refresh-token.dto';
 import {
   UserResponseDto,
   PublicUserResponseDto,
@@ -33,7 +35,7 @@ import {
 import { LoginLogService } from '../../logs/services/login-log.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import { Express } from 'express';
+import { Express, Request as ExpressRequest } from 'express';
 import { AVATAR_MAX_SIZE } from '../services/user.service';
 
 const avatarUploadOptions = {
@@ -41,6 +43,25 @@ const avatarUploadOptions = {
   limits: {
     fileSize: AVATAR_MAX_SIZE,
   },
+};
+
+type AuthenticatedRequest = ExpressRequest & {
+  user: {
+    id: number;
+    username: string;
+    role: string;
+    uuid?: string;
+  };
+};
+
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return '未知错误';
 };
 
 @ApiTags('用户')
@@ -56,7 +77,7 @@ export class UserController {
   @ApiOperation({ summary: '用户注册' })
   @ApiResponse({ status: 201, description: '注册成功' })
   @ApiResponse({ status: 409, description: '用户名或邮箱已被注册' })
-  async register(@Body() registerDto: RegisterDto, @Req() req: any) {
+  async register(@Body() registerDto: RegisterDto, @Req() req: ExpressRequest) {
     try {
       const user = await this.userService.register(registerDto);
       const result = await this.authService.login(user);
@@ -78,7 +99,7 @@ export class UserController {
         ip_address: this.loginLogService.extractIpAddress(req),
         user_agent: this.loginLogService.extractUserAgent(req),
         result: 'FAILED',
-        fail_reason: error.message,
+        fail_reason: getErrorMessage(error),
         username: registerDto.username,
       });
       throw error;
@@ -89,7 +110,35 @@ export class UserController {
   @ApiOperation({ summary: '用户登录' })
   @ApiResponse({ status: 200, description: '登录成功' })
   @ApiResponse({ status: 401, description: '用户名或密码错误' })
-  async login(@Body() loginDto: LoginDto, @Req() req: any) {
+  async login(@Body() loginDto: LoginDto, @Req() req: ExpressRequest) {
+    const ipAddress = this.loginLogService.extractIpAddress(req);
+    const userAgent = this.loginLogService.extractUserAgent(req);
+    const guardResult = await this.loginLogService.checkLoginAllowed({
+      ipAddress,
+      username: loginDto.username,
+    });
+
+    if (!guardResult.allowed) {
+      await this.loginLogService.logLoginAttempt({
+        login_type: 'PASSWORD',
+        ip_address: ipAddress,
+        user_agent: userAgent,
+        result: 'BLOCKED',
+        fail_reason: guardResult.reason || '登录限制命中',
+        username: loginDto.username,
+      });
+
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          message: '登录尝试过于频繁，请稍后再试',
+          error: 'Too Many Requests',
+          retryAfterSeconds: guardResult.retryAfterSeconds,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     try {
       const user = await this.userService.login(loginDto);
       const result = await this.authService.login(user);
@@ -98,8 +147,8 @@ export class UserController {
       await this.loginLogService.logLoginAttempt({
         user_id: user.id,
         login_type: 'PASSWORD',
-        ip_address: this.loginLogService.extractIpAddress(req),
-        user_agent: this.loginLogService.extractUserAgent(req),
+        ip_address: ipAddress,
+        user_agent: userAgent,
         result: 'SUCCESS',
       });
 
@@ -108,14 +157,32 @@ export class UserController {
       // 记录失败的登录尝试
       await this.loginLogService.logLoginAttempt({
         login_type: 'PASSWORD',
-        ip_address: this.loginLogService.extractIpAddress(req),
-        user_agent: this.loginLogService.extractUserAgent(req),
+        ip_address: ipAddress,
+        user_agent: userAgent,
         result: 'FAILED',
-        fail_reason: error.message,
+        fail_reason: getErrorMessage(error),
         username: loginDto.username,
       });
       throw error;
     }
+  }
+
+  @Post('refresh-token')
+  @ApiOperation({ summary: '刷新访问令牌' })
+  @ApiResponse({ status: 200, description: '刷新成功' })
+  @ApiResponse({ status: 401, description: 'refresh token 无效或已过期' })
+  async refreshToken(@Body() refreshTokenDto: RefreshTokenDto) {
+    return this.authService.refreshAccessToken(refreshTokenDto.refresh_token);
+  }
+
+  @Post('logout')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '用户登出（使当前会话失效）' })
+  @ApiResponse({ status: 200, description: '登出成功' })
+  @ApiResponse({ status: 401, description: '未授权' })
+  async logout(@Req() req: AuthenticatedRequest) {
+    return this.authService.logout(req.user.id);
   }
 
   @Get('profile')
@@ -124,7 +191,7 @@ export class UserController {
   @ApiOperation({ summary: '获取当前用户信息' })
   @ApiResponse({ status: 200, description: '获取成功', type: UserResponseDto })
   @ApiResponse({ status: 401, description: '未授权' })
-  async getProfile(@Request() req) {
+  async getProfile(@Req() req: AuthenticatedRequest) {
     const user = await this.userService.findById(req.user.id);
     return new UserResponseDto(user);
   }
@@ -136,7 +203,10 @@ export class UserController {
   @ApiResponse({ status: 200, description: '更新成功', type: UserResponseDto })
   @ApiResponse({ status: 401, description: '未授权' })
   @ApiResponse({ status: 409, description: '用户名或邮箱已被使用' })
-  async updateProfile(@Request() req, @Body() updateUserDto: UpdateUserDto) {
+  async updateProfile(
+    @Req() req: AuthenticatedRequest,
+    @Body() updateUserDto: UpdateUserDto,
+  ) {
     const user = await this.userService.updateUser(req.user.id, updateUserDto);
     return new UserResponseDto(user);
   }
@@ -166,7 +236,7 @@ export class UserController {
     type: UserResponseDto,
   })
   async uploadAvatar(
-    @Request() req,
+    @Req() req: AuthenticatedRequest,
     @UploadedFile() file: Express.Multer.File,
   ) {
     const user = await this.userService.updateAvatar(req.user.id, file);
@@ -197,7 +267,7 @@ export class UserController {
   @ApiResponse({ status: 401, description: '当前密码错误或未授权' })
   @ApiResponse({ status: 409, description: '新密码不能与当前密码相同' })
   async changePassword(
-    @Request() req,
+    @Req() req: AuthenticatedRequest,
     @Body() changePasswordDto: ChangePasswordDto,
   ) {
     await this.userService.changePassword(req.user.id, changePasswordDto);

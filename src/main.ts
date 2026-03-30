@@ -4,11 +4,14 @@ import { AllExceptionsFilter } from './all-exceptions.filter';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import * as express from 'express';
+import { NextFunction, Request, Response } from 'express';
 import {
   ensureUploadStructure,
   migrateLegacyProcessedDirectory,
   PROCESSED_ROOT,
 } from './common/utils/storage-path.util';
+import { getAllowedCorsOrigins } from './config/security.config';
 
 async function bootstrap() {
   // 设置时区为中国标准时间 (UTC+8)
@@ -18,23 +21,24 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false,
   });
+  const isBodyParserDebugEnabled = process.env.BODY_PARSER_DEBUG === 'true';
+
+  if (process.env.TRUST_PROXY === 'true' || process.env.NODE_ENV === 'production') {
+    app.set('trust proxy', 1);
+  }
 
   // 手动配置body parser，确保multipart请求不被JSON解析器处理
-  const express = require('express');
-  const multer = require('multer');
-
-  // 创建一个临时的multer实例用于检测multipart请求
-  const upload = multer();
-
   // 精确的请求处理中间件
-  app.use((req, res, next) => {
+  app.use((req: Request, res: Response, next: NextFunction) => {
     const contentType = req.get('content-type') || '';
-    const rawHeaders = req.rawHeaders;
 
-    // 详细日志用于调试
-    console.log(`[Body Parser] ${req.method} ${req.path}`);
-    console.log(`[Body Parser] Content-Type: "${contentType}"`);
-    console.log(`[Body Parser] Raw Headers: ${JSON.stringify(rawHeaders)}`);
+    if (isBodyParserDebugEnabled) {
+      console.log(`[Body Parser] ${req.method} ${req.path}`);
+      console.log(`[Body Parser] Content-Type: "${contentType}"`);
+      console.log(
+        `[Body Parser] Raw Headers: ${JSON.stringify(req.rawHeaders)}`,
+      );
+    }
 
     // 更严格的multipart检测
     const isMultipart = contentType
@@ -44,23 +48,33 @@ async function bootstrap() {
 
     if (isMultipart || isUploadChunk) {
       // multipart请求或上传分片路由：完全跳过所有body parser
-      console.log('[Body Parser] Skipping multipart/upload request');
+      if (isBodyParserDebugEnabled) {
+        console.log('[Body Parser] Skipping multipart/upload request');
+      }
       next();
     } else if (contentType.includes('application/json')) {
       // JSON请求：使用JSON解析器
-      console.log('[Body Parser] Using JSON parser');
+      if (isBodyParserDebugEnabled) {
+        console.log('[Body Parser] Using JSON parser');
+      }
       express.json({ limit: '50mb' })(req, res, next);
     } else if (contentType.includes('application/x-www-form-urlencoded')) {
       // URL编码请求：使用URL编码解析器
-      console.log('[Body Parser] Using URL encoded parser');
+      if (isBodyParserDebugEnabled) {
+        console.log('[Body Parser] Using URL encoded parser');
+      }
       express.urlencoded({ limit: '50mb', extended: true })(req, res, next);
     } else if (contentType === '') {
       // 空Content-Type：可能是OPTIONS请求，直接跳过
-      console.log('[Body Parser] Empty content-type, skipping');
+      if (isBodyParserDebugEnabled) {
+        console.log('[Body Parser] Empty content-type, skipping');
+      }
       next();
     } else {
       // 其他请求：尝试JSON解析器（兼容性）
-      console.log('[Body Parser] Using default JSON parser for unknown type');
+      if (isBodyParserDebugEnabled) {
+        console.log('[Body Parser] Using default JSON parser for unknown type');
+      }
       express.json({ limit: '50mb' })(req, res, next);
     }
   });
@@ -85,9 +99,18 @@ async function bootstrap() {
   );
 
   // 启用CORS，允许跨域请求
-  // app.enableCors()
+  const allowedCorsOrigins = getAllowedCorsOrigins();
   app.enableCors({
-    origin: 'http://localhost:3001',
+    origin: (
+      origin: string | undefined,
+      callback: (error: Error | null, allow?: boolean) => void,
+    ) => {
+      if (!origin || allowedCorsOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error(`CORS blocked origin: ${origin}`));
+    },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: ['Content-Type', 'Authorization', 'Range'], // 添加Range头支持视频流
     exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length'], // 暴露视频播放需要的头
@@ -122,4 +145,4 @@ async function bootstrap() {
   console.log(`🚀 后端服务启动在端口: ${port}`);
   await app.listen(port);
 }
-bootstrap();
+void bootstrap();

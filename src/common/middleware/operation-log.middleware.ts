@@ -1,35 +1,73 @@
-import { Injectable, NestMiddleware } from '@nestjs/common';
+import { Injectable, Logger, NestMiddleware } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { Request, Response, NextFunction } from 'express';
 import { LogsService } from '../../logs/services/logs.service';
 
 @Injectable()
 export class OperationLogMiddleware implements NestMiddleware {
+  private readonly logger = new Logger(OperationLogMiddleware.name);
+
   constructor(private readonly logsService: LogsService) {}
 
   use(req: Request, res: Response, next: NextFunction) {
     // 获取原始的 res.json 方法
-    const originalJson = res.json;
+    const originalJson = res.json.bind(res) as JsonHandler;
     const logsService = this.logsService; // 保存引用到闭包中
+    const logger = this.logger;
 
     // 重写 res.json 方法
-    res.json = function (body) {
+    res.json = function jsonOverride(this: Response, body: unknown): Response {
       // 记录操作日志
-      const user = (req as any).user;
+      const user = (req as AuthenticatedRequest).user;
       if (user && shouldLogOperation(req)) {
         const logData = extractLogData(req, res, body, user);
         // 异步记录日志，不阻塞响应
         setImmediate(() => {
-          logsService.logOperation(logData).catch(console.error);
+          void logsService.logOperation(logData).catch((error: unknown) => {
+            const errorMessage =
+              error instanceof Error ? error.message : '未知错误';
+            const errorStack = error instanceof Error ? error.stack : undefined;
+            logger.error(`记录操作日志失败: ${errorMessage}`, errorStack);
+          });
         });
       }
 
       // 调用原始的 json 方法
-      return originalJson.call(this, body);
+      return originalJson(body);
     };
 
     next();
   }
 }
+
+type AuthenticatedRequest = Request & {
+  user?: { id: number };
+};
+
+type JsonHandler = (body: unknown) => Response;
+
+type OperationLogUser = { id: number };
+
+type OperationLogData = {
+  user_id: number;
+  operation_type:
+    | 'USER_ACTION'
+    | 'MEDIA_ACTION'
+    | 'ADMIN_ACTION'
+    | 'SYSTEM_ACTION';
+  module: string;
+  action: string;
+  target_type?: string;
+  target_id?: string;
+  target_name?: string;
+  old_values?: Prisma.JsonValue;
+  new_values?: Prisma.JsonValue;
+  ip_address: string;
+  user_agent: string;
+  description: string;
+  result: 'SUCCESS' | 'FAILED' | 'PARTIAL';
+  error_message?: string;
+};
 
 /**
  * 判断是否需要记录操作日志
@@ -75,9 +113,9 @@ function shouldLogOperation(req: Request): boolean {
 function extractLogData(
   req: Request,
   res: Response,
-  responseBody: any,
-  user: any,
-) {
+  responseBody: unknown,
+  user: OperationLogUser,
+): OperationLogData {
   const method = req.method;
   const path = req.path;
   const statusCode = res.statusCode;
@@ -91,8 +129,7 @@ function extractLogData(
 
   if (statusCode >= 400) {
     result = 'FAILED';
-    error_message =
-      responseBody?.message || responseBody?.error || `HTTP ${statusCode}`;
+    error_message = getResponseMessage(responseBody, statusCode);
   } else if (statusCode >= 200 && statusCode < 300) {
     result = 'SUCCESS';
   } else {
@@ -103,7 +140,7 @@ function extractLogData(
   const ip_address = getClientIp(req);
 
   // 获取User-Agent
-  const user_agent = req.headers['user-agent'] || '';
+  const user_agent = getHeaderValue(req.headers, 'user-agent') ?? '';
 
   return {
     user_id: user.id,
@@ -113,8 +150,8 @@ function extractLogData(
     target_type: operationInfo.target_type,
     target_id: operationInfo.target_id,
     target_name: operationInfo.target_name,
-    old_values: null, // 需要在具体的controller中设置
-    new_values: req.body,
+    old_values: undefined, // 需要在具体的controller中设置
+    new_values: normalizeJsonValue(req.body),
     ip_address,
     user_agent,
     description: operationInfo.description,
@@ -213,7 +250,7 @@ function parseOperationInfo(method: string, path: string) {
  * 获取模块中文名称
  */
 function getModuleName(module: string): string {
-  const moduleNames = {
+  const moduleNames: Record<string, string> = {
     media: '媒体',
     users: '用户',
     tags: '标签',
@@ -222,7 +259,7 @@ function getModuleName(module: string): string {
     favorites: '收藏',
     comments: '评论',
   };
-  return moduleNames[module] || module;
+  return moduleNames[module] ?? module;
 }
 
 /**
@@ -235,16 +272,57 @@ function getActionName(action: string): string {
   return action;
 }
 
+function getHeaderValue(
+  headers: Request['headers'],
+  key: string,
+): string | undefined {
+  const value = headers[key];
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  return undefined;
+}
+
+function normalizeJsonValue(value: unknown): Prisma.JsonValue | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    const replacer = (_key: string, item: unknown): unknown => {
+      if (typeof item === 'bigint') {
+        return item.toString();
+      }
+      return item;
+    };
+    const normalized = JSON.parse(
+      JSON.stringify(value, replacer),
+    ) as Prisma.JsonValue;
+    return normalized;
+  } catch {
+    return undefined;
+  }
+}
+
+function getResponseMessage(responseBody: unknown, statusCode: number): string {
+  if (responseBody && typeof responseBody === 'object') {
+    const record = responseBody as Record<string, unknown>;
+    if (typeof record.message === 'string') return record.message;
+    if (typeof record.error === 'string') return record.error;
+  }
+  return `HTTP ${statusCode}`;
+}
+
 /**
  * 获取客户端真实IP地址
  */
 function getClientIp(req: Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  const ip = forwarded
-    ? Array.isArray(forwarded)
-      ? forwarded[0]
-      : forwarded.split(',')[0]
-    : req.connection.remoteAddress || req.socket.remoteAddress || 'unknown';
-
+  const forwarded = getHeaderValue(req.headers, 'x-forwarded-for');
+  const realIp = getHeaderValue(req.headers, 'x-real-ip');
+  const socketIp = req.socket.remoteAddress;
+  const rawIp = forwarded ?? realIp ?? socketIp ?? 'unknown';
+  const ip = rawIp.includes(',') ? rawIp.split(',')[0] : rawIp;
   return ip.replace(/^::ffff:/, ''); // 移除IPv6前缀
 }

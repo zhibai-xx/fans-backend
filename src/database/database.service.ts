@@ -4,8 +4,34 @@ import {
   OnModuleDestroy,
   Logger,
 } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
+
+type PrismaNext = (params: Prisma.MiddlewareParams) => Promise<unknown>;
+
+type QueryCacheEntry = { data: unknown; timestamp: number };
+
+type PaginationQueryOptions = {
+  where?: Record<string, unknown>;
+  include?: Record<string, unknown>;
+  orderBy?: Record<string, unknown> | Array<Record<string, unknown>>;
+  skip?: number;
+  take?: number;
+};
+
+type ModelDelegate = {
+  findMany: (args: Record<string, unknown>) => Promise<unknown[]>;
+  count: (args: Record<string, unknown>) => Promise<number>;
+  createMany?: (args: Record<string, unknown>) => Promise<unknown>;
+};
+
+type SerializableValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: SerializableValue }
+  | SerializableValue[];
 
 @Injectable()
 export class DatabaseService
@@ -32,15 +58,17 @@ export class DatabaseService
     });
 
     // 性能监控中间件
-    this.$use(async (params, next) => {
+    this.$use(async (params: Prisma.MiddlewareParams, next: PrismaNext) => {
       const start = Date.now();
       const result = await next(params);
       const duration = Date.now() - start;
 
       // 记录慢查询（超过100ms）
       if (duration > 100) {
+        const modelName = params.model ?? 'unknown';
+        const actionName = params.action ?? 'unknown';
         this.logger.warn(
-          `慢查询检测: ${params.model}.${params.action} 耗时 ${duration}ms`,
+          `慢查询检测: ${modelName}.${actionName} 耗时 ${duration}ms`,
         );
       }
 
@@ -48,10 +76,12 @@ export class DatabaseService
     });
 
     // 查询优化中间件
-    this.$use(async (params, next) => {
+    this.$use(async (params: Prisma.MiddlewareParams, next: PrismaNext) => {
       // 自动添加分页限制，防止大量数据查询
-      if (params.action === 'findMany' && !params.args.take) {
-        params.args.take = 100; // 默认限制100条
+      const args = this.asRecord(params.args);
+      if (params.action === 'findMany' && args && args.take === undefined) {
+        args.take = 100; // 默认限制100条
+        params.args = args;
       }
 
       return next(params);
@@ -82,7 +112,7 @@ export class DatabaseService
   private startPerformanceMonitoring() {
     // 每分钟记录一次连接池状态
     setInterval(() => {
-      this.logConnectionPoolStatus();
+      void this.logConnectionPoolStatus();
     }, 60000);
   }
 
@@ -109,32 +139,28 @@ export class DatabaseService
    */
   async findManyWithPagination<T>(
     model: string,
-    options: {
-      where?: any;
-      include?: any;
-      orderBy?: any;
-      skip?: number;
-      take?: number;
-    },
+    options: PaginationQueryOptions,
   ) {
     const { skip = 0, take = 20, ...queryOptions } = options;
 
     // 限制每页最大数量
     const limitedTake = Math.min(take, 100);
+    const delegate = this.getModelDelegate(model);
 
     const [data, total] = await Promise.all([
-      (this as any)[model].findMany({
+      delegate.findMany({
         ...queryOptions,
         skip,
         take: limitedTake,
       }),
-      (this as any)[model].count({
+      delegate.count({
         where: queryOptions.where,
       }),
     ]);
+    const list = Array.isArray(data) ? (data as T[]) : [];
 
     return {
-      data,
+      data: list,
       total,
       page: Math.floor(skip / limitedTake) + 1,
       totalPages: Math.ceil(total / limitedTake),
@@ -146,12 +172,20 @@ export class DatabaseService
   /**
    * 批量操作优化
    */
-  async batchCreate(model: string, data: any[], batchSize = 100) {
-    const results: any[] = [];
+  async batchCreate(
+    model: string,
+    data: ReadonlyArray<unknown>,
+    batchSize = 100,
+  ) {
+    const results: unknown[] = [];
+    const delegate = this.getModelDelegate(model);
+    if (!delegate.createMany) {
+      throw new Error(`模型 ${model} 不支持 createMany`);
+    }
 
     for (let i = 0; i < data.length; i += batchSize) {
       const batch = data.slice(i, i + batchSize);
-      const batchResult = await (this as any)[model].createMany({
+      const batchResult = await delegate.createMany({
         data: batch,
         skipDuplicates: true,
       });
@@ -164,7 +198,7 @@ export class DatabaseService
   /**
    * 缓存查询结果
    */
-  private queryCache = new Map<string, { data: any; timestamp: number }>();
+  private queryCache = new Map<string, QueryCacheEntry>();
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5分钟
 
   async cachedQuery<T>(
@@ -176,7 +210,7 @@ export class DatabaseService
     const now = Date.now();
 
     if (cached && now - cached.timestamp < ttl) {
-      return cached.data;
+      return cached.data as T;
     }
 
     const data = await queryFn();
@@ -208,10 +242,11 @@ export class DatabaseService
       await this.$queryRaw`SELECT 1`;
       return { status: 'healthy', timestamp: new Date() };
     } catch (error) {
-      this.logger.error('数据库健康检查失败:', error);
+      const message = error instanceof Error ? error.message : '未知错误';
+      this.logger.error(`数据库健康检查失败: ${message}`);
       return {
         status: 'unhealthy',
-        error: error.message,
+        error: message,
         timestamp: new Date(),
       };
     }
@@ -220,9 +255,9 @@ export class DatabaseService
   /**
    * 转换BigInt为字符串，解决JSON序列化问题
    */
-  private convertBigIntToString(data: any): any {
+  private convertBigIntToString(data: unknown): SerializableValue {
     if (data === null || data === undefined) {
-      return data;
+      return null;
     }
 
     if (typeof data === 'bigint') {
@@ -234,14 +269,46 @@ export class DatabaseService
     }
 
     if (typeof data === 'object') {
-      const result: any = {};
+      const result: Record<string, SerializableValue> = {};
       for (const [key, value] of Object.entries(data)) {
         result[key] = this.convertBigIntToString(value);
       }
       return result;
     }
 
-    return data;
+    if (typeof data === 'number' || typeof data === 'string') {
+      return data;
+    }
+    if (typeof data === 'boolean') {
+      return data;
+    }
+    return null;
+  }
+
+  private getModelDelegate(model: string): ModelDelegate {
+    const delegate = (this as Record<string, unknown>)[model];
+    if (this.isModelDelegate(delegate)) {
+      return delegate;
+    }
+    throw new Error(`未知的模型: ${model}`);
+  }
+
+  private isModelDelegate(value: unknown): value is ModelDelegate {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+    const record = value as Record<string, unknown>;
+    return (
+      typeof record.findMany === 'function' &&
+      typeof record.count === 'function'
+    );
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+    return value as Record<string, unknown>;
   }
 
   /**

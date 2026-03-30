@@ -7,6 +7,20 @@ import * as sharp from 'sharp';
 import { promises as fsPromises } from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return '未知错误';
+};
+
+const getErrorStack = (error: unknown): string | undefined => {
+  return error instanceof Error ? error.stack : undefined;
+};
+
 @Injectable()
 export class LocalStorageService implements IStorageService {
   private readonly uploadDir: string;
@@ -24,8 +38,8 @@ export class LocalStorageService implements IStorageService {
     this.absoluteThumbnailDir = path.resolve(this.thumbnailDir);
 
     // 确保目录存在
-    this.ensureDirectoryExists(this.uploadDir);
-    this.ensureDirectoryExists(this.thumbnailDir);
+    void this.ensureDirectoryExists(this.uploadDir);
+    void this.ensureDirectoryExists(this.thumbnailDir);
   }
 
   /**
@@ -35,7 +49,8 @@ export class LocalStorageService implements IStorageService {
   private async ensureDirectoryExists(directory: string): Promise<void> {
     try {
       await fsPromises.access(path.resolve(directory), fs.constants.F_OK);
-    } catch (error) {
+    } catch (_error) {
+      void _error;
       await fsPromises.mkdir(path.resolve(directory), { recursive: true });
     }
   }
@@ -100,13 +115,17 @@ export class LocalStorageService implements IStorageService {
       try {
         await fsPromises.access(thumbnailPath, fs.constants.F_OK);
         await fsPromises.unlink(thumbnailPath);
-      } catch (error) {
+      } catch (_error) {
+        void _error;
         // 缩略图不存在，忽略错误
       }
 
       return true;
     } catch (error) {
-      this.logger.error(`删除本地文件失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `删除本地文件失败: ${getErrorMessage(error)}`,
+        getErrorStack(error),
+      );
       return false;
     }
   }
@@ -154,7 +173,10 @@ export class LocalStorageService implements IStorageService {
       // 返回缩略图URL
       return `/api/upload/file/${relativePath.replace(/\\/g, '/')}`;
     } catch (error) {
-      this.logger.error(`生成缩略图失败: ${error.message}`, error.stack);
+      this.logger.error(
+        `生成缩略图失败: ${getErrorMessage(error)}`,
+        getErrorStack(error),
+      );
       return '';
     }
   }
