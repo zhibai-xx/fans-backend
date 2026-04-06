@@ -45,6 +45,41 @@ const compactUndefined = <T extends Record<string, unknown>>(
   return Object.fromEntries(entries) as Partial<T>;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const hasPagination = (
+  value: unknown,
+): value is PaginatedResult<unknown>['pagination'] =>
+  isRecord(value) &&
+  typeof value.page === 'number' &&
+  typeof value.limit === 'number' &&
+  typeof value.total === 'number' &&
+  typeof value.totalPages === 'number';
+
+const toPaginatedResult = (value: unknown): PaginatedResult<unknown> => {
+  if (
+    !isRecord(value) ||
+    !Array.isArray(value.data) ||
+    !hasPagination(value.pagination)
+  ) {
+    throw new Error('Invalid paginated result');
+  }
+
+  return {
+    data: value.data,
+    pagination: value.pagination,
+  };
+};
+
+const toObjectResult = <T extends object>(value: unknown): T => {
+  if (!isRecord(value)) {
+    throw new Error('Invalid object result');
+  }
+
+  return value as T;
+};
+
 type LogsServiceLike = {
   getOperationLogs(
     filters: Partial<OperationLogsQuery>,
@@ -67,6 +102,57 @@ type LogsServiceLike = {
 
 const asLogsService = (service: LogsService): LogsServiceLike =>
   service as unknown as LogsServiceLike;
+
+const fetchOperationLogs = async (
+  service: LogsServiceLike,
+  filters: Partial<OperationLogsQuery>,
+  page: number,
+  limit: number,
+): Promise<PaginatedResult<unknown>> => {
+  const result: unknown = await service.getOperationLogs(filters, page, limit);
+  return toPaginatedResult(result);
+};
+
+const fetchLoginLogs = async (
+  service: LogsServiceLike,
+  filters: Partial<LoginLogsQuery>,
+  page: number,
+  limit: number,
+): Promise<PaginatedResult<unknown>> => {
+  const result: unknown = await service.getLoginLogs(filters, page, limit);
+  return toPaginatedResult(result);
+};
+
+const fetchOperationStats = async (
+  service: LogsServiceLike,
+  days: number,
+): Promise<OperationStatsResult> => {
+  const result: unknown = await service.getOperationStats(days);
+  return toObjectResult<OperationStatsResult>(result);
+};
+
+const fetchLoginStats = async (
+  service: LogsServiceLike,
+  days: number,
+): Promise<LoginStatsResult> => {
+  const result: unknown = await service.getLoginStats(days);
+  return toObjectResult<LoginStatsResult>(result);
+};
+
+const fetchUserActivityStats = async (
+  service: LogsServiceLike,
+  days: number,
+  page: number,
+  limit: number,
+): Promise<UserActivityResult> => {
+  const result: unknown = await service.getUserActivityStats(days, page, limit);
+  const paginated = toPaginatedResult(result);
+
+  return {
+    data: paginated.data,
+    pagination: paginated.pagination,
+  } as UserActivityResult;
+};
 
 @ApiTags('管理员 - 操作日志')
 @Controller('admin/logs')
@@ -114,7 +200,8 @@ export class AdminLogsController {
       end_date,
     });
 
-    const operationResult = await logsService.getOperationLogs(
+    const operationResult = await fetchOperationLogs(
+      logsService,
       filters,
       page,
       limit,
@@ -160,7 +247,7 @@ export class AdminLogsController {
       end_date,
     });
 
-    const loginResult = await logsService.getLoginLogs(filters, page, limit);
+    const loginResult = await fetchLoginLogs(logsService, filters, page, limit);
 
     return {
       success: true,
@@ -183,7 +270,7 @@ export class AdminLogsController {
     @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
   ) {
     const logsService = asLogsService(this.logsService);
-    const stats = await logsService.getOperationStats(days);
+    const stats = await fetchOperationStats(logsService, days);
 
     return {
       success: true,
@@ -205,7 +292,7 @@ export class AdminLogsController {
     @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
   ) {
     const logsService = asLogsService(this.logsService);
-    const stats = await logsService.getLoginStats(days);
+    const stats = await fetchLoginStats(logsService, days);
 
     return {
       success: true,
@@ -227,7 +314,7 @@ export class AdminLogsController {
     @Query('days', new DefaultValuePipe(7), ParseIntPipe) days: number,
   ) {
     const logsService = asLogsService(this.logsService);
-    const stats = await logsService.getUserActivityStats(days, page, limit);
+    const stats = await fetchUserActivityStats(logsService, days, page, limit);
 
     return {
       success: true,
