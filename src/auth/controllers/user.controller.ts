@@ -54,6 +54,14 @@ type AuthenticatedRequest = ExpressRequest & {
   };
 };
 
+type LoginLogServiceLike = Pick<
+  LoginLogService,
+  | 'logLoginAttempt'
+  | 'extractIpAddress'
+  | 'extractUserAgent'
+  | 'checkLoginAllowed'
+>;
+
 const getErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
     return error.message;
@@ -62,6 +70,38 @@ const getErrorMessage = (error: unknown): string => {
     return error;
   }
   return '未知错误';
+};
+
+const buildLoginAttemptContext = (
+  loginLogService: LoginLogServiceLike,
+  req: ExpressRequest,
+): { ipAddress: string; userAgent: string } => ({
+  ipAddress: loginLogService.extractIpAddress(req),
+  userAgent: loginLogService.extractUserAgent(req),
+});
+
+const recordPasswordAttempt = async (
+  loginLogService: LoginLogServiceLike,
+  params: {
+    req: ExpressRequest;
+    result: 'FAILED' | 'BLOCKED';
+    username: string;
+    failReason: string;
+  },
+): Promise<void> => {
+  const { ipAddress, userAgent } = buildLoginAttemptContext(
+    loginLogService,
+    params.req,
+  );
+
+  await loginLogService.logLoginAttempt({
+    login_type: 'PASSWORD',
+    ip_address: ipAddress,
+    user_agent: userAgent,
+    result: params.result,
+    fail_reason: params.failReason,
+    username: params.username,
+  });
 };
 
 @ApiTags('用户')
@@ -73,43 +113,33 @@ export class UserController {
     private readonly loginLogService: LoginLogService,
   ) {}
 
-  private async logPasswordAttempt(params: {
-    req: ExpressRequest;
-    result: 'FAILED' | 'BLOCKED';
-    username: string;
-    failReason: string;
-  }): Promise<void> {
-    await this.loginLogService.logLoginAttempt({
-      login_type: 'PASSWORD',
-      ip_address: this.loginLogService.extractIpAddress(params.req),
-      user_agent: this.loginLogService.extractUserAgent(params.req),
-      result: params.result,
-      fail_reason: params.failReason,
-      username: params.username,
-    });
-  }
-
   @Post('register')
   @ApiOperation({ summary: '用户注册' })
   @ApiResponse({ status: 201, description: '注册成功' })
   @ApiResponse({ status: 409, description: '用户名或邮箱已被注册' })
   async register(@Body() registerDto: RegisterDto, @Req() req: ExpressRequest) {
+    const loginLogService: LoginLogServiceLike = this.loginLogService;
+
     try {
       const user = await this.userService.register(registerDto);
       const result = await this.authService.login(user);
+      const { ipAddress, userAgent } = buildLoginAttemptContext(
+        loginLogService,
+        req,
+      );
 
       // 记录成功注册的登录日志
-      await this.loginLogService.logLoginAttempt({
+      await loginLogService.logLoginAttempt({
         user_id: user.id,
         login_type: 'PASSWORD',
-        ip_address: this.loginLogService.extractIpAddress(req),
-        user_agent: this.loginLogService.extractUserAgent(req),
+        ip_address: ipAddress,
+        user_agent: userAgent,
         result: 'SUCCESS',
       });
 
       return result;
     } catch (error: unknown) {
-      await this.logPasswordAttempt({
+      await recordPasswordAttempt(loginLogService, {
         req,
         result: 'FAILED',
         failReason: getErrorMessage(error),
@@ -124,15 +154,18 @@ export class UserController {
   @ApiResponse({ status: 200, description: '登录成功' })
   @ApiResponse({ status: 401, description: '用户名或密码错误' })
   async login(@Body() loginDto: LoginDto, @Req() req: ExpressRequest) {
-    const ipAddress = this.loginLogService.extractIpAddress(req);
-    const userAgent = this.loginLogService.extractUserAgent(req);
-    const guardResult = await this.loginLogService.checkLoginAllowed({
+    const loginLogService: LoginLogServiceLike = this.loginLogService;
+    const { ipAddress, userAgent } = buildLoginAttemptContext(
+      loginLogService,
+      req,
+    );
+    const guardResult = await loginLogService.checkLoginAllowed({
       ipAddress,
       username: loginDto.username,
     });
 
     if (!guardResult.allowed) {
-      await this.logPasswordAttempt({
+      await recordPasswordAttempt(loginLogService, {
         req,
         result: 'BLOCKED',
         failReason: guardResult.reason || '登录限制命中',
@@ -165,7 +198,7 @@ export class UserController {
 
       return result;
     } catch (error: unknown) {
-      await this.logPasswordAttempt({
+      await recordPasswordAttempt(loginLogService, {
         req,
         result: 'FAILED',
         failReason: getErrorMessage(error),
