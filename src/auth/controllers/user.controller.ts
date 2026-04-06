@@ -54,13 +54,34 @@ type AuthenticatedRequest = ExpressRequest & {
   };
 };
 
-type LoginLogServiceLike = Pick<
-  LoginLogService,
-  | 'logLoginAttempt'
-  | 'extractIpAddress'
-  | 'extractUserAgent'
-  | 'checkLoginAllowed'
->;
+type LoginGuardResult = {
+  allowed: boolean;
+  reason?: string;
+  retryAfterSeconds?: number;
+};
+
+type LoginAttemptPayload = {
+  user_id?: number;
+  login_type?: 'PASSWORD' | 'OAUTH' | 'REMEMBER_ME';
+  ip_address: string;
+  user_agent: string;
+  result: 'SUCCESS' | 'FAILED' | 'BLOCKED';
+  fail_reason?: string;
+  username?: string;
+};
+
+type LoginLogServiceLike = {
+  logLoginAttempt(data: LoginAttemptPayload): Promise<void>;
+  extractIpAddress(req: ExpressRequest): string;
+  extractUserAgent(req: ExpressRequest): string;
+  checkLoginAllowed(params: {
+    ipAddress: string;
+    username: string;
+  }): Promise<LoginGuardResult>;
+};
+
+const asLoginLogService = (service: LoginLogService): LoginLogServiceLike =>
+  service as unknown as LoginLogServiceLike;
 
 const getErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
@@ -118,7 +139,7 @@ export class UserController {
   @ApiResponse({ status: 201, description: '注册成功' })
   @ApiResponse({ status: 409, description: '用户名或邮箱已被注册' })
   async register(@Body() registerDto: RegisterDto, @Req() req: ExpressRequest) {
-    const loginLogService: LoginLogServiceLike = this.loginLogService;
+    const loginLogService = asLoginLogService(this.loginLogService);
 
     try {
       const user = await this.userService.register(registerDto);
@@ -154,7 +175,7 @@ export class UserController {
   @ApiResponse({ status: 200, description: '登录成功' })
   @ApiResponse({ status: 401, description: '用户名或密码错误' })
   async login(@Body() loginDto: LoginDto, @Req() req: ExpressRequest) {
-    const loginLogService: LoginLogServiceLike = this.loginLogService;
+    const loginLogService = asLoginLogService(this.loginLogService);
     const { ipAddress, userAgent } = buildLoginAttemptContext(
       loginLogService,
       req,
