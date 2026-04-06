@@ -9,13 +9,7 @@ import {
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { AdminRoleGuard } from '../../auth/guards/admin-role.guard';
-import {
-  LoginStatsResult,
-  LogsService,
-  OperationStatsResult,
-  PaginatedResult,
-  UserActivityResult,
-} from '../../logs/services/logs.service';
+import { LogsService } from '../../logs/services/logs.service';
 
 type OperationLogsQuery = {
   operation_type?: string;
@@ -48,36 +42,62 @@ const compactUndefined = <T extends Record<string, unknown>>(
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
-const hasPagination = (
-  value: unknown,
-): value is PaginatedResult<unknown>['pagination'] =>
+type Pagination = {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+};
+
+type ObjectResponse = {
+  success: true;
+  data: Record<string, unknown>;
+};
+
+type PaginatedResponse = {
+  success: true;
+  data: unknown[];
+  pagination: Pagination;
+};
+
+const isUnknownArray = (value: unknown): value is unknown[] =>
+  Array.isArray(value);
+
+const hasPagination = (value: unknown): value is Pagination =>
   isRecord(value) &&
   typeof value.page === 'number' &&
   typeof value.limit === 'number' &&
   typeof value.total === 'number' &&
   typeof value.totalPages === 'number';
 
-const toPaginatedResult = (value: unknown): PaginatedResult<unknown> => {
-  if (
-    !isRecord(value) ||
-    !Array.isArray(value.data) ||
-    !hasPagination(value.pagination)
-  ) {
+const toPaginatedResponse = (value: unknown): PaginatedResponse => {
+  if (!isRecord(value)) {
+    throw new Error('Invalid paginated result');
+  }
+
+  const data = value.data;
+  const pagination = value.pagination;
+
+  if (!isUnknownArray(data) || !hasPagination(pagination)) {
     throw new Error('Invalid paginated result');
   }
 
   return {
-    data: value.data,
-    pagination: value.pagination,
+    success: true,
+    data,
+    pagination,
   };
 };
 
-const toObjectResult = <T extends object>(value: unknown): T => {
+const toObjectResponse = (value: unknown): ObjectResponse => {
   if (!isRecord(value)) {
     throw new Error('Invalid object result');
   }
 
-  return value as T;
+  return {
+    success: true,
+    data: value,
+  };
 };
 
 type LogsServiceLike = {
@@ -85,19 +105,19 @@ type LogsServiceLike = {
     filters: Partial<OperationLogsQuery>,
     page: number,
     limit: number,
-  ): Promise<PaginatedResult<unknown>>;
+  ): Promise<unknown>;
   getLoginLogs(
     filters: Partial<LoginLogsQuery>,
     page: number,
     limit: number,
-  ): Promise<PaginatedResult<unknown>>;
-  getOperationStats(days: number): Promise<OperationStatsResult>;
-  getLoginStats(days: number): Promise<LoginStatsResult>;
+  ): Promise<unknown>;
+  getOperationStats(days: number): Promise<unknown>;
+  getLoginStats(days: number): Promise<unknown>;
   getUserActivityStats(
     days: number,
     page: number,
     limit: number,
-  ): Promise<UserActivityResult>;
+  ): Promise<unknown>;
 };
 
 const asLogsService = (service: LogsService): LogsServiceLike =>
@@ -108,9 +128,9 @@ const fetchOperationLogs = async (
   filters: Partial<OperationLogsQuery>,
   page: number,
   limit: number,
-): Promise<PaginatedResult<unknown>> => {
-  const result: unknown = await service.getOperationLogs(filters, page, limit);
-  return toPaginatedResult(result);
+): Promise<PaginatedResponse> => {
+  const result = await service.getOperationLogs(filters, page, limit);
+  return toPaginatedResponse(result);
 };
 
 const fetchLoginLogs = async (
@@ -118,25 +138,25 @@ const fetchLoginLogs = async (
   filters: Partial<LoginLogsQuery>,
   page: number,
   limit: number,
-): Promise<PaginatedResult<unknown>> => {
-  const result: unknown = await service.getLoginLogs(filters, page, limit);
-  return toPaginatedResult(result);
+): Promise<PaginatedResponse> => {
+  const result = await service.getLoginLogs(filters, page, limit);
+  return toPaginatedResponse(result);
 };
 
 const fetchOperationStats = async (
   service: LogsServiceLike,
   days: number,
-): Promise<OperationStatsResult> => {
-  const result: unknown = await service.getOperationStats(days);
-  return toObjectResult<OperationStatsResult>(result);
+): Promise<ObjectResponse> => {
+  const result = await service.getOperationStats(days);
+  return toObjectResponse(result);
 };
 
 const fetchLoginStats = async (
   service: LogsServiceLike,
   days: number,
-): Promise<LoginStatsResult> => {
-  const result: unknown = await service.getLoginStats(days);
-  return toObjectResult<LoginStatsResult>(result);
+): Promise<ObjectResponse> => {
+  const result = await service.getLoginStats(days);
+  return toObjectResponse(result);
 };
 
 const fetchUserActivityStats = async (
@@ -144,14 +164,9 @@ const fetchUserActivityStats = async (
   days: number,
   page: number,
   limit: number,
-): Promise<UserActivityResult> => {
-  const result: unknown = await service.getUserActivityStats(days, page, limit);
-  const paginated = toPaginatedResult(result);
-
-  return {
-    data: paginated.data,
-    pagination: paginated.pagination,
-  } as UserActivityResult;
+): Promise<PaginatedResponse> => {
+  const result = await service.getUserActivityStats(days, page, limit);
+  return toPaginatedResponse(result);
 };
 
 @ApiTags('管理员 - 操作日志')
@@ -207,11 +222,7 @@ export class AdminLogsController {
       limit,
     );
 
-    return {
-      success: true,
-      data: operationResult.data,
-      pagination: operationResult.pagination,
-    };
+    return operationResult;
   }
 
   /**
@@ -249,11 +260,7 @@ export class AdminLogsController {
 
     const loginResult = await fetchLoginLogs(logsService, filters, page, limit);
 
-    return {
-      success: true,
-      data: loginResult.data,
-      pagination: loginResult.pagination,
-    };
+    return loginResult;
   }
 
   /**
@@ -272,10 +279,7 @@ export class AdminLogsController {
     const logsService = asLogsService(this.logsService);
     const stats = await fetchOperationStats(logsService, days);
 
-    return {
-      success: true,
-      data: stats,
-    };
+    return stats;
   }
 
   /**
@@ -294,10 +298,7 @@ export class AdminLogsController {
     const logsService = asLogsService(this.logsService);
     const stats = await fetchLoginStats(logsService, days);
 
-    return {
-      success: true,
-      data: stats,
-    };
+    return stats;
   }
 
   /**
@@ -316,10 +317,6 @@ export class AdminLogsController {
     const logsService = asLogsService(this.logsService);
     const stats = await fetchUserActivityStats(logsService, days, page, limit);
 
-    return {
-      success: true,
-      data: stats.data,
-      pagination: stats.pagination,
-    };
+    return stats;
   }
 }
