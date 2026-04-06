@@ -9,7 +9,41 @@ import {
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { AdminRoleGuard } from '../../auth/guards/admin-role.guard';
-import { LogsService } from '../../logs/services/logs.service';
+import {
+  LoginStatsResult,
+  LogsService,
+  OperationStatsResult,
+  PaginatedResult,
+  UserActivityResult,
+} from '../../logs/services/logs.service';
+
+type OperationLogsQuery = {
+  operation_type?: string;
+  module?: string;
+  action?: string;
+  result?: string;
+  user_id?: number;
+  start_date?: string;
+  end_date?: string;
+};
+
+type LoginLogsQuery = {
+  login_type?: string;
+  result?: string;
+  user_id?: number;
+  ip_address?: string;
+  start_date?: string;
+  end_date?: string;
+};
+
+const compactUndefined = <T extends Record<string, unknown>>(
+  value: T,
+): Partial<T> => {
+  const entries = Object.entries(value).filter(
+    ([, item]) => item !== undefined,
+  );
+  return Object.fromEntries(entries) as Partial<T>;
+};
 
 @ApiTags('管理员 - 操作日志')
 @Controller('admin/logs')
@@ -46,7 +80,7 @@ export class AdminLogsController {
     @Query('start_date') start_date?: string,
     @Query('end_date') end_date?: string,
   ) {
-    const filters = {
+    const filters: Partial<OperationLogsQuery> = compactUndefined({
       operation_type,
       module,
       action,
@@ -54,20 +88,10 @@ export class AdminLogsController {
       user_id,
       start_date,
       end_date,
-    };
-
-    // 移除未定义的过滤器
-    Object.keys(filters).forEach((key) => {
-      if (filters[key] === undefined) {
-        delete filters[key];
-      }
     });
 
-    const operationResult = await this.logsService.getOperationLogs(
-      filters,
-      page,
-      limit,
-    );
+    const operationResult: PaginatedResult<unknown> =
+      await this.logsService.getOperationLogs(filters, page, limit);
 
     return {
       success: true,
@@ -99,27 +123,17 @@ export class AdminLogsController {
     @Query('start_date') start_date?: string,
     @Query('end_date') end_date?: string,
   ) {
-    const filters = {
+    const filters: Partial<LoginLogsQuery> = compactUndefined({
       login_type,
       result: resultFilter,
       user_id,
       ip_address,
       start_date,
       end_date,
-    };
-
-    // 移除未定义的过滤器
-    Object.keys(filters).forEach((key) => {
-      if (filters[key] === undefined) {
-        delete filters[key];
-      }
     });
 
-    const loginResult = await this.logsService.getLoginLogs(
-      filters,
-      page,
-      limit,
-    );
+    const loginResult: PaginatedResult<unknown> =
+      await this.logsService.getLoginLogs(filters, page, limit);
 
     return {
       success: true,
@@ -141,7 +155,8 @@ export class AdminLogsController {
   async getOperationStats(
     @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
   ) {
-    const stats = await this.logsService.getOperationStats(days);
+    const stats: OperationStatsResult =
+      await this.logsService.getOperationStats(days);
 
     return {
       success: true,
@@ -162,7 +177,7 @@ export class AdminLogsController {
   async getLoginStats(
     @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
   ) {
-    const stats = await this.logsService.getLoginStats(days);
+    const stats: LoginStatsResult = await this.logsService.getLoginStats(days);
 
     return {
       success: true,
@@ -183,11 +198,8 @@ export class AdminLogsController {
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
     @Query('days', new DefaultValuePipe(7), ParseIntPipe) days: number,
   ) {
-    const stats = await this.logsService.getUserActivityStats(
-      days,
-      page,
-      limit,
-    );
+    const stats: UserActivityResult =
+      await this.logsService.getUserActivityStats(days, page, limit);
 
     return {
       success: true,

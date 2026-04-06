@@ -12,7 +12,8 @@ export class OperationLogMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction) {
     // 获取原始的 res.json 方法
     const originalJson = res.json.bind(res) as JsonHandler;
-    const logsService = this.logsService; // 保存引用到闭包中
+    const logOperation = (data: OperationLogData): Promise<void> =>
+      this.logsService.logOperation(data).then(() => undefined);
     const logger = this.logger;
 
     // 重写 res.json 方法
@@ -23,7 +24,7 @@ export class OperationLogMiddleware implements NestMiddleware {
         const logData = extractLogData(req, res, body, user);
         // 异步记录日志，不阻塞响应
         setImmediate(() => {
-          void logsService.logOperation(logData).catch((error: unknown) => {
+          void logOperation(logData).catch((error: unknown) => {
             const errorMessage =
               error instanceof Error ? error.message : '未知错误';
             const errorStack = error instanceof Error ? error.stack : undefined;
