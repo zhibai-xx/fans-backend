@@ -73,6 +73,22 @@ export class UserController {
     private readonly loginLogService: LoginLogService,
   ) {}
 
+  private async logPasswordAttempt(params: {
+    req: ExpressRequest;
+    result: 'FAILED' | 'BLOCKED';
+    username: string;
+    failReason: string;
+  }): Promise<void> {
+    await this.loginLogService.logLoginAttempt({
+      login_type: 'PASSWORD',
+      ip_address: this.loginLogService.extractIpAddress(params.req),
+      user_agent: this.loginLogService.extractUserAgent(params.req),
+      result: params.result,
+      fail_reason: params.failReason,
+      username: params.username,
+    });
+  }
+
   @Post('register')
   @ApiOperation({ summary: '用户注册' })
   @ApiResponse({ status: 201, description: '注册成功' })
@@ -92,14 +108,11 @@ export class UserController {
       });
 
       return result;
-    } catch (error) {
-      // 记录失败的注册尝试
-      await this.loginLogService.logLoginAttempt({
-        login_type: 'PASSWORD',
-        ip_address: this.loginLogService.extractIpAddress(req),
-        user_agent: this.loginLogService.extractUserAgent(req),
+    } catch (error: unknown) {
+      await this.logPasswordAttempt({
+        req,
         result: 'FAILED',
-        fail_reason: getErrorMessage(error),
+        failReason: getErrorMessage(error),
         username: registerDto.username,
       });
       throw error;
@@ -119,12 +132,10 @@ export class UserController {
     });
 
     if (!guardResult.allowed) {
-      await this.loginLogService.logLoginAttempt({
-        login_type: 'PASSWORD',
-        ip_address: ipAddress,
-        user_agent: userAgent,
+      await this.logPasswordAttempt({
+        req,
         result: 'BLOCKED',
-        fail_reason: guardResult.reason || '登录限制命中',
+        failReason: guardResult.reason || '登录限制命中',
         username: loginDto.username,
       });
 
@@ -153,14 +164,11 @@ export class UserController {
       });
 
       return result;
-    } catch (error) {
-      // 记录失败的登录尝试
-      await this.loginLogService.logLoginAttempt({
-        login_type: 'PASSWORD',
-        ip_address: ipAddress,
-        user_agent: userAgent,
+    } catch (error: unknown) {
+      await this.logPasswordAttempt({
+        req,
         result: 'FAILED',
-        fail_reason: getErrorMessage(error),
+        failReason: getErrorMessage(error),
         username: loginDto.username,
       });
       throw error;
