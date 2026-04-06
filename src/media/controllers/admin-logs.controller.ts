@@ -45,6 +45,29 @@ const compactUndefined = <T extends Record<string, unknown>>(
   return Object.fromEntries(entries) as Partial<T>;
 };
 
+type LogsServiceLike = {
+  getOperationLogs(
+    filters: Partial<OperationLogsQuery>,
+    page: number,
+    limit: number,
+  ): Promise<PaginatedResult<unknown>>;
+  getLoginLogs(
+    filters: Partial<LoginLogsQuery>,
+    page: number,
+    limit: number,
+  ): Promise<PaginatedResult<unknown>>;
+  getOperationStats(days: number): Promise<OperationStatsResult>;
+  getLoginStats(days: number): Promise<LoginStatsResult>;
+  getUserActivityStats(
+    days: number,
+    page: number,
+    limit: number,
+  ): Promise<UserActivityResult>;
+};
+
+const asLogsService = (service: LogsService): LogsServiceLike =>
+  service as unknown as LogsServiceLike;
+
 @ApiTags('管理员 - 操作日志')
 @Controller('admin/logs')
 @UseGuards(JwtAuthGuard, AdminRoleGuard)
@@ -80,6 +103,7 @@ export class AdminLogsController {
     @Query('start_date') start_date?: string,
     @Query('end_date') end_date?: string,
   ) {
+    const logsService = asLogsService(this.logsService);
     const filters: Partial<OperationLogsQuery> = compactUndefined({
       operation_type,
       module,
@@ -91,7 +115,7 @@ export class AdminLogsController {
     });
 
     const operationResult: PaginatedResult<unknown> =
-      await this.logsService.getOperationLogs(filters, page, limit);
+      await logsService.getOperationLogs(filters, page, limit);
 
     return {
       success: true,
@@ -123,6 +147,7 @@ export class AdminLogsController {
     @Query('start_date') start_date?: string,
     @Query('end_date') end_date?: string,
   ) {
+    const logsService = asLogsService(this.logsService);
     const filters: Partial<LoginLogsQuery> = compactUndefined({
       login_type,
       result: resultFilter,
@@ -133,7 +158,7 @@ export class AdminLogsController {
     });
 
     const loginResult: PaginatedResult<unknown> =
-      await this.logsService.getLoginLogs(filters, page, limit);
+      await logsService.getLoginLogs(filters, page, limit);
 
     return {
       success: true,
@@ -155,8 +180,9 @@ export class AdminLogsController {
   async getOperationStats(
     @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
   ) {
+    const logsService = asLogsService(this.logsService);
     const stats: OperationStatsResult =
-      await this.logsService.getOperationStats(days);
+      await logsService.getOperationStats(days);
 
     return {
       success: true,
@@ -177,7 +203,8 @@ export class AdminLogsController {
   async getLoginStats(
     @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
   ) {
-    const stats: LoginStatsResult = await this.logsService.getLoginStats(days);
+    const logsService = asLogsService(this.logsService);
+    const stats: LoginStatsResult = await logsService.getLoginStats(days);
 
     return {
       success: true,
@@ -198,8 +225,12 @@ export class AdminLogsController {
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
     @Query('days', new DefaultValuePipe(7), ParseIntPipe) days: number,
   ) {
-    const stats: UserActivityResult =
-      await this.logsService.getUserActivityStats(days, page, limit);
+    const logsService = asLogsService(this.logsService);
+    const stats: UserActivityResult = await logsService.getUserActivityStats(
+      days,
+      page,
+      limit,
+    );
 
     return {
       success: true,

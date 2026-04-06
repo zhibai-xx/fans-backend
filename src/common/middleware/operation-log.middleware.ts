@@ -3,6 +3,13 @@ import { Prisma } from '@prisma/client';
 import { Request, Response, NextFunction } from 'express';
 import { LogsService } from '../../logs/services/logs.service';
 
+type LogsServiceLike = {
+  logOperation(data: OperationLogData): Promise<void>;
+};
+
+const asLogsService = (service: LogsService): LogsServiceLike =>
+  service as unknown as LogsServiceLike;
+
 @Injectable()
 export class OperationLogMiddleware implements NestMiddleware {
   private readonly logger = new Logger(OperationLogMiddleware.name);
@@ -12,8 +19,9 @@ export class OperationLogMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction) {
     // 获取原始的 res.json 方法
     const originalJson = res.json.bind(res) as JsonHandler;
+    const logsService = asLogsService(this.logsService);
     const logOperation = (data: OperationLogData): Promise<void> =>
-      this.logsService.logOperation(data).then(() => undefined);
+      logsService.logOperation(data).then(() => undefined);
     const logger = this.logger;
 
     // 重写 res.json 方法

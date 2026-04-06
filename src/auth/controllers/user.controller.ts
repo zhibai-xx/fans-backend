@@ -209,7 +209,7 @@ export class UserController {
       const result = await this.authService.login(user);
 
       // 记录成功登录
-      await this.loginLogService.logLoginAttempt({
+      await loginLogService.logLoginAttempt({
         user_id: user.id,
         login_type: 'PASSWORD',
         ip_address: ipAddress,
