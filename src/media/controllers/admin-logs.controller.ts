@@ -114,8 +114,11 @@ export class AdminLogsController {
       end_date,
     });
 
-    const operationResult: PaginatedResult<unknown> =
-      await logsService.getOperationLogs(filters, page, limit);
+    const operationResult = await logsService.getOperationLogs(
+      filters,
+      page,
+      limit,
+    );
 
     return {
       success: true,
@@ -157,8 +160,7 @@ export class AdminLogsController {
       end_date,
     });
 
-    const loginResult: PaginatedResult<unknown> =
-      await logsService.getLoginLogs(filters, page, limit);
+    const loginResult = await logsService.getLoginLogs(filters, page, limit);
 
     return {
       success: true,
@@ -181,8 +183,7 @@ export class AdminLogsController {
     @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
   ) {
     const logsService = asLogsService(this.logsService);
-    const stats: OperationStatsResult =
-      await logsService.getOperationStats(days);
+    const stats = await logsService.getOperationStats(days);
 
     return {
       success: true,
@@ -204,7 +205,7 @@ export class AdminLogsController {
     @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
   ) {
     const logsService = asLogsService(this.logsService);
-    const stats: LoginStatsResult = await logsService.getLoginStats(days);
+    const stats = await logsService.getLoginStats(days);
 
     return {
       success: true,
@@ -226,11 +227,7 @@ export class AdminLogsController {
     @Query('days', new DefaultValuePipe(7), ParseIntPipe) days: number,
   ) {
     const logsService = asLogsService(this.logsService);
-    const stats: UserActivityResult = await logsService.getUserActivityStats(
-      days,
-      page,
-      limit,
-    );
+    const stats = await logsService.getUserActivityStats(days, page, limit);
 
     return {
       success: true,
