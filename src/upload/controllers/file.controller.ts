@@ -6,6 +6,7 @@ import {
   Req,
   NotFoundException,
   Header,
+  Logger,
 } from '@nestjs/common';
 import { Response, Request } from 'express';
 import { join } from 'path';
@@ -16,6 +17,8 @@ import { ConfigService } from '@nestjs/config';
 @Controller('upload/file')
 export class FileController {
   private readonly uploadDir: string;
+  private readonly logger = new Logger(FileController.name);
+  private readonly disallowedDirectories = new Set(['temp', 'chunks']);
 
   constructor(private readonly configService: ConfigService) {
     this.uploadDir =
@@ -48,39 +51,29 @@ export class FileController {
     @Req() req: Request,
     @Res() res: Response, // 移除 passthrough，直接控制响应
   ): void {
-    console.log(
-      '📁 FileController.serveFile - 文件类型:',
-      type,
-      '文件名:',
-      filename,
-    );
-
     try {
+      if (this.disallowedDirectories.has(type)) {
+        throw new NotFoundException('文件不存在或无法访问');
+      }
+
       // 构建相对路径
       const relativePath = `${type}/${filename}`;
-      console.log('📂 相对路径:', relativePath);
 
       // 净化文件路径，防止目录遍历攻击
       const sanitizedPath = this.sanitizeFilePath(relativePath);
-      console.log('🧹 净化后的路径:', sanitizedPath);
 
       // 构建文件的完整路径
       const filePath = join(this.uploadDir, sanitizedPath);
-      console.log('📂 完整文件路径:', filePath);
 
       // 检查文件是否在上传目录内（安全检查）
       if (!this.isPathUnderUploadDir(filePath)) {
-        console.log('❌ 安全检查失败 - 文件不在上传目录内');
         throw new NotFoundException('文件不存在或无法访问');
       }
 
       // 检查文件是否存在
       if (!fs.existsSync(filePath)) {
-        console.log('❌ 文件不存在:', filePath);
         throw new NotFoundException('文件不存在');
       }
-
-      console.log('✅ 文件存在，开始提供服务');
 
       // 获取文件信息
       const stat = fs.statSync(filePath);
@@ -90,8 +83,6 @@ export class FileController {
       const range = req.headers.range;
 
       if (range && contentType.startsWith('video/')) {
-        console.log('📹 处理Range请求:', range);
-
         // 解析Range头
         const parts = range.replace(/bytes=/, '').split('-');
         const start = parseInt(parts[0], 10);
@@ -113,8 +104,6 @@ export class FileController {
         fileStream.pipe(res);
       } else {
         // 普通请求
-        console.log('📄 处理普通文件请求');
-
         res.set({
           'Content-Type': contentType,
           'Content-Length': stat.size.toString(),
@@ -129,7 +118,7 @@ export class FileController {
       }
     } catch (error) {
       const message = this.getErrorMessage(error);
-      console.log('💥 FileController 错误:', message);
+      this.logger.warn(`文件访问失败: ${message}`);
       if (error instanceof NotFoundException) {
         res.status(404).json({
           statusCode: 404,

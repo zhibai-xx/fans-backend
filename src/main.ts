@@ -22,8 +22,14 @@ async function bootstrap() {
     bodyParser: false,
   });
   const isBodyParserDebugEnabled = process.env.BODY_PARSER_DEBUG === 'true';
+  const isSwaggerEnabled =
+    process.env.ENABLE_SWAGGER === 'true' ||
+    process.env.NODE_ENV !== 'production';
 
-  if (process.env.TRUST_PROXY === 'true' || process.env.NODE_ENV === 'production') {
+  if (
+    process.env.TRUST_PROXY === 'true' ||
+    process.env.NODE_ENV === 'production'
+  ) {
     app.set('trust proxy', 1);
   }
 
@@ -130,15 +136,17 @@ async function bootstrap() {
   // 设置全局API前缀，所有路由都会以/api开头
   app.setGlobalPrefix('api');
 
-  // 配置 Swagger
-  const config = new DocumentBuilder()
-    .setTitle('Fans Backend API')
-    .setDescription('Fans 后端 API 文档')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, document);
+  // Swagger 仅在开发环境或显式开启时暴露，避免生产环境默认公开 API 文档
+  if (isSwaggerEnabled) {
+    const config = new DocumentBuilder()
+      .setTitle('Fans Backend API')
+      .setDescription('Fans 后端 API 文档')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, document);
+  }
 
   // 启动应用并监听指定端口，如果环境变量没有设置端口则使用3000
   const port = process.env.PORT ?? 3000;

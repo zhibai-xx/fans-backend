@@ -1,3 +1,15 @@
+# 2026-03-31
+- 健康检查 `/api/health` 显式跳过 `short/medium/long` 全局限流桶，避免探活与性能 smoke 被 `429` 误伤
+- 收紧本地文件访问：`/api/upload/file/:type/:filename` 禁止访问 `temp`/`chunks` 上传中转目录
+- 删除后端旧 `test/` 脚手架并将 `test:e2e` 对齐为当前真实集成测试集，避免上线前继续跑到失效用例
+- 生产环境默认关闭 Swagger 文档暴露，仅在开发或显式设置 `ENABLE_SWAGGER=true` 时于 `/api/docs` 启用
+- 新增 `docs/PRODUCTION_ENV_CHECKLIST.md`，集中整理前后端与 Compose 生产环境变量填写要求与上线核对项
+- 生产部署材料进一步收口：`deploy/compose/docker-compose.prod.yml` 强制要求前后端 `.env.production` 存在，避免缺环境变量时误启动
+- 新增 Compose 级环境模板 `deploy/compose/.env.prod.example`，集中管理 PostgreSQL 初始化参数
+- Nginx 生产模板 `deploy/nginx/fans.conf` 默认对齐 `enjoycorner.com / www.enjoycorner.com`
+- 新增部署运行手册 `docs/DEPLOY_RUNBOOK.md`，覆盖备案通过前准备、备案通过当天启动步骤与上线后第一轮回归
+- 接口契约变更：否
+
 # 2026-03-17
 - 上线前部署收口：新增后端 `Dockerfile` 与 `.dockerignore`，可直接构建生产镜像并通过 `npm run start:prod` 以 `3000` 端口启动
 - 生产代理适配：Nest 启动时在 `TRUST_PROXY=true` 或生产环境下启用 `trust proxy`，确保后续挂在 Nginx/CDN 后能正确获取真实来源链路

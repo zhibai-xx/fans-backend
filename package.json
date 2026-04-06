@@ -17,7 +17,7 @@
     "test:watch": "npm run test:unit -- --watch",
     "test:cov": "npm run test:unit -- --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:e2e": "npm run test:integration",
     "db:seed": "ts-node prisma/seed.ts",
     "db:reset": "prisma migrate reset && npm run db:seed",
     "typecheck": "tsc --noEmit",

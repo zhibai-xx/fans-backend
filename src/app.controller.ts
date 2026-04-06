@@ -1,4 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { AppService } from './app.service';
 import { DatabaseService } from './database/database.service';
 import { GuestDownloadRateLimitService } from './media/services/guest-download-rate-limit.service';
@@ -35,6 +36,11 @@ export class AppController {
   }
 
   @Get('health')
+  @SkipThrottle({
+    short: true,
+    medium: true,
+    long: true,
+  })
   async getHealth(): Promise<HealthResponse> {
     const [databaseHealth, redisHealth] = await Promise.all([
       this.databaseService.healthCheck(),

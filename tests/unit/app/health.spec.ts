@@ -10,16 +10,23 @@ describe('AppController • health endpoint', () => {
         timestamp: new Date(),
       }),
     };
+    const guestDownloadRateLimitService = {
+      ping: jest.fn().mockResolvedValue({
+        status: 'healthy',
+      }),
+    };
 
     const controller = new AppController(
       appService,
       databaseService as never,
+      guestDownloadRateLimitService as never,
     );
     const response = await controller.getHealth();
 
     expect(response.status).toBe('healthy');
     expect(response.success).toBe(true);
     expect(response.checks.database.status).toBe('healthy');
+    expect(response.checks.redis.status).toBe('healthy');
   });
 
   it('returns unhealthy status when database check fails', async () => {
@@ -31,10 +38,16 @@ describe('AppController • health endpoint', () => {
         timestamp: new Date(),
       }),
     };
+    const guestDownloadRateLimitService = {
+      ping: jest.fn().mockResolvedValue({
+        status: 'healthy',
+      }),
+    };
 
     const controller = new AppController(
       appService,
       databaseService as never,
+      guestDownloadRateLimitService as never,
     );
     const response = await controller.getHealth();
 
@@ -42,5 +55,6 @@ describe('AppController • health endpoint', () => {
     expect(response.success).toBe(false);
     expect(response.checks.database.status).toBe('unhealthy');
     expect(response.checks.database.error).toBe('connection failed');
+    expect(response.checks.redis.status).toBe('healthy');
   });
 });
