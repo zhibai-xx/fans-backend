@@ -42,7 +42,7 @@ cp .env.production.example .env.production
 Compose 级变量（仅本地 PostgreSQL 方案需要）：
 
 ```bash
-cd /path/to/zjy-fans/deploy/compose
+cd /path/to/zjy-fans/fans-backend/deploy/compose
 cp .env.prod.example .env.prod
 ```
 
@@ -83,7 +83,7 @@ Compose（仅本地 PostgreSQL 方案需要）：
 如果使用阿里云 RDS PostgreSQL：
 
 ```bash
-cd /path/to/zjy-fans
+cd /path/to/zjy-fans/fans-backend
 docker compose \
   -f deploy/compose/docker-compose.prod.rds.yml \
   up -d --build
@@ -92,7 +92,7 @@ docker compose \
 如果使用 Compose 内 PostgreSQL：
 
 ```bash
-cd /path/to/zjy-fans
+cd /path/to/zjy-fans/fans-backend
 docker compose \
   --env-file deploy/compose/.env.prod \
   -f deploy/compose/docker-compose.prod.yml \

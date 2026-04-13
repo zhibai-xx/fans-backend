@@ -4,7 +4,7 @@
 
 - 前端：`/Users/houjiawei/Desktop/Projects/zjy-fans/fans-next/.env.production`
 - 后端：`/Users/houjiawei/Desktop/Projects/zjy-fans/fans-backend/.env.production`
-- Compose：`/Users/houjiawei/Desktop/Projects/zjy-fans/deploy/compose/.env.prod`
+- Compose：`/Users/houjiawei/Desktop/Projects/zjy-fans/fans-backend/deploy/compose/.env.prod`
 
 目标：
 
