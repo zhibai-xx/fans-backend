@@ -78,8 +78,7 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 *.db
 
 # Prisma
-/prisma/migrations/**/migration.sql
-# 保留 schema.prisma 和 migration 结构，但不包含具体的 migration SQL
+# 生产部署依赖 migration SQL；不要忽略 prisma/migrations 下的迁移文件
 
 # Upload directories (本地上传文件)
 /uploads/
