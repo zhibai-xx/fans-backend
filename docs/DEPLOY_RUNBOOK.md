@@ -135,6 +135,39 @@ curl http://127.0.0.1/api/health
 
 先确认 HTTP 全链路正常，再接入证书与 HTTPS。
 
+安装 certbot：
+
+```bash
+sudo apt update
+sudo apt install -y certbot
+```
+
+临时停止 nginx 容器，释放 80 端口：
+
+```bash
+cd /home/admin/apps/zjy-fans/fans-backend
+docker compose -f deploy/compose/docker-compose.prod.rds.yml stop nginx
+```
+
+申请证书：
+
+```bash
+sudo certbot certonly --standalone -d enjoycorner.com -d www.enjoycorner.com
+```
+
+重新拉起 nginx：
+
+```bash
+docker compose -f deploy/compose/docker-compose.prod.rds.yml up -d nginx
+```
+
+验证：
+
+```bash
+curl -I https://enjoycorner.com
+curl -I https://www.enjoycorner.com
+```
+
 ## 上线后第一轮回归
 
 ### 游客链路
