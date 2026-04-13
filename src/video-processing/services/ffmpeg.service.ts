@@ -1,9 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import execa from 'execa';
-import ffmpegStatic from 'ffmpeg-static';
-import * as ffprobeStatic from 'ffprobe-static';
 import * as fs from 'fs-extra';
+import { createRequire } from 'module';
 import * as path from 'path';
 
 export interface VideoMetadata {
@@ -54,6 +53,23 @@ type FfprobeResult = {
   format: FfprobeFormat;
   streams: FfprobeStream[];
 };
+
+type FfprobeStaticModule = {
+  path?: unknown;
+};
+
+const loadOptionalModule = <T>(moduleName: string): T | undefined => {
+  const localRequire = createRequire(__filename);
+
+  try {
+    return localRequire(moduleName) as T;
+  } catch {
+    return undefined;
+  }
+};
+
+const ffmpegStatic = loadOptionalModule<string>('ffmpeg-static');
+const ffprobeStatic = loadOptionalModule<FfprobeStaticModule>('ffprobe-static');
 
 /**
  * FFmpeg服务 - 使用原生FFmpeg CLI替代废弃的fluent-ffmpeg
@@ -159,12 +175,23 @@ export class FFmpegService {
   }
 
   private resolveFfmpegPath(): string {
+    const configuredPath = this.configService.get<string>('FFMPEG_PATH');
+    if (configuredPath?.trim()) {
+      return configuredPath;
+    }
+
     return typeof ffmpegStatic === 'string' ? ffmpegStatic : 'ffmpeg';
   }
 
   private resolveFfprobePath(): string {
-    const candidate = ffprobeStatic as { path?: unknown } | null;
-    return typeof candidate?.path === 'string' ? candidate.path : 'ffprobe';
+    const configuredPath = this.configService.get<string>('FFPROBE_PATH');
+    if (configuredPath?.trim()) {
+      return configuredPath;
+    }
+
+    return typeof ffprobeStatic?.path === 'string'
+      ? ffprobeStatic.path
+      : 'ffprobe';
   }
 
   private getErrorMessage(error: unknown): string {

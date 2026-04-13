@@ -1,3 +1,11 @@
+# 2026-04-13
+- 部署链路收口：将 `deploy/` 迁入 `fans-backend` 仓库，避免服务器部署时还要额外同步根目录部署文件
+- 修正后端 `.gitignore` 中 `logs` 误伤 `src/logs` 源码目录的问题，CI 不再因缺失日志模块源码而出现 `TS2307`
+- 新增 `scripts/repro-ci-lint.sh` 与 `npm run lint:ci:repro`，可在本地用 `node:20` 容器复现 GitHub Actions 的 typed lint 环境
+- 视频处理运行时改为优先使用系统 `ffmpeg` / `ffprobe`，不再依赖 `ffmpeg-static` / `ffprobe-static` 在 `npm ci` 阶段下载二进制
+- 后端运行镜像在 runner 阶段通过 `apk add --no-cache ffmpeg` 提供 ffmpeg，降低国内服务器首次构建失败风险
+- 接口契约变更：否
+
 # 2026-03-31
 - 健康检查 `/api/health` 显式跳过 `short/medium/long` 全局限流桶，避免探活与性能 smoke 被 `429` 误伤
 - 收紧本地文件访问：`/api/upload/file/:type/:filename` 禁止访问 `temp`/`chunks` 上传中转目录

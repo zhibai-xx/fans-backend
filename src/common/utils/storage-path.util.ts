@@ -61,7 +61,9 @@ export async function migrateLegacyProcessedDirectory(logger?: {
 
   if (newIsEmpty) {
     if (logger?.log) {
-      logger.log('检测到空的 uploads/processed 目录，开始迁移旧 processed 内容');
+      logger.log(
+        '检测到空的 uploads/processed 目录，开始迁移旧 processed 内容',
+      );
     }
     await fs.remove(PROCESSED_ROOT);
     await fs.move(LEGACY_PROCESSED_ROOT, PROCESSED_ROOT, { overwrite: false });

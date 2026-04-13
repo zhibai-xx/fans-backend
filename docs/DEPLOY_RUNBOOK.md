@@ -12,6 +12,16 @@
 - 轻量应用服务器：`Nginx + fans-next + fans-backend + Redis`
 - 数据库：阿里云 `RDS PostgreSQL`
 
+视频处理运行时说明：
+
+- 当前首发阶段：`ENABLE_VIDEO_FEATURE=false`
+- 后端镜像不再依赖 `ffmpeg-static` / `ffprobe-static` 在 `npm ci` 阶段下载二进制
+- 生产环境默认使用系统 `ffmpeg` / `ffprobe`
+- Docker 运行镜像已内置 `ffmpeg`
+- 如果未来恢复视频模块，建议显式配置：
+  - `FFMPEG_PATH=/usr/bin/ffmpeg`
+  - `FFPROBE_PATH=/usr/bin/ffprobe`
+
 ## 备案通过前
 
 ### 1. 服务器准备
@@ -64,6 +74,9 @@ cp .env.prod.example .env.prod
 - `TRUST_PROXY=true`
 - `BODY_PARSER_DEBUG=false`
 - `ENABLE_SWAGGER=false`
+- 如需恢复视频模块，再额外确认：
+  - `FFMPEG_PATH`
+  - `FFPROBE_PATH`
 
 Compose（仅本地 PostgreSQL 方案需要）：
 

@@ -73,11 +73,9 @@ import { VideoProcessingModule } from './video-processing/video-processing.modul
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer
-      .apply(PerformanceMiddleware, OperationLogMiddleware)
-      .forRoutes({
-        path: '{*path}',
-        method: RequestMethod.ALL,
-      });
+    consumer.apply(PerformanceMiddleware, OperationLogMiddleware).forRoutes({
+      path: '{*path}',
+      method: RequestMethod.ALL,
+    });
   }
 }
