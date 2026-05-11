@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+WORKSPACE_DIR="$(cd "${BACKEND_DIR}/.." && pwd)"
+FRONTEND_DIR="${WORKSPACE_DIR}/fans-next"
+LOCAL_ENV_FILE="${BACKEND_DIR}/.env.local"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  bash scripts/fansctl <command> [args]
+
+Commands:
+  local-check
+    Run backend lint/typecheck/unit+integration tests, then frontend lint/typecheck.
+
+  prod-http [base_url]
+    Smoke-check homepage, login, images, and /api/health.
+    Default base_url: https://enjoycorner.com
+
+  prod-ops
+    Show docker runtime status, disk usage, and recent service logs on the server.
+
+  prod-auth-upload [base_url]
+    Browser smoke for prod login/session/upload init.
+    Requires PROD_SMOKE_USERNAME and PROD_SMOKE_PASSWORD.
+
+  prod-logs [service]
+    Tail recent logs for one service. Default service: fans-backend
+EOF
+}
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+print_section() {
+  printf '\n== %s ==\n' "$1"
+}
+
+load_local_env() {
+  if [[ -f "$LOCAL_ENV_FILE" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$LOCAL_ENV_FILE"
+    set +a
+  fi
+}
+
+cmd_local_check() {
+  print_section "Backend lint"
+  (cd "$BACKEND_DIR" && npm run lint)
+
+  print_section "Backend typecheck"
+  (cd "$BACKEND_DIR" && npm run typecheck)
+
+  print_section "Backend tests"
+  (cd "$BACKEND_DIR" && npm run test)
+
+  print_section "Frontend lint"
+  (cd "$FRONTEND_DIR" && npm run lint)
+
+  print_section "Frontend typecheck"
+  (cd "$FRONTEND_DIR" && npm run typecheck)
+}
+
+cmd_prod_http() {
+  require_cmd curl
+  local base_url="${1:-https://enjoycorner.com}"
+
+  print_section "Homepage"
+  curl -fsSIL "$base_url"
+
+  print_section "Login"
+  curl -fsSIL "$base_url/login"
+
+  print_section "Images"
+  curl -fsSIL "$base_url/images"
+
+  print_section "Health"
+  curl -fsSL "$base_url/api/health"
+}
+
+cmd_prod_ops() {
+  require_cmd docker
+  require_cmd df
+
+  print_section "Docker ps"
+  docker ps
+
+  print_section "Docker system df"
+  docker system df
+
+  print_section "Disk usage"
+  df -h
+
+  print_section "Recent backend logs"
+  docker logs --tail=120 fans-backend
+
+  print_section "Recent frontend logs"
+  docker logs --tail=80 fans-frontend
+
+  print_section "Recent nginx logs"
+  docker logs --tail=80 fans-nginx
+
+  print_section "Redis ping"
+  docker exec fans-redis redis-cli ping
+}
+
+cmd_prod_auth_upload() {
+  require_cmd node
+  local base_url="${1:-https://enjoycorner.com}"
+
+  load_local_env
+
+  if [[ -n "${FRONTEND_BASE_URL:-}" && "$base_url" == "https://enjoycorner.com" ]]; then
+    base_url="$FRONTEND_BASE_URL"
+  fi
+
+  if [[ -z "${PROD_SMOKE_USERNAME:-}" || -z "${PROD_SMOKE_PASSWORD:-}" ]]; then
+    echo "Missing PROD_SMOKE_USERNAME or PROD_SMOKE_PASSWORD in environment or ${LOCAL_ENV_FILE}" >&2
+    exit 1
+  fi
+
+  print_section "Prod auth/upload smoke"
+  (
+    cd "$FRONTEND_DIR" && \
+      FRONTEND_BASE_URL="$base_url" \
+      PROD_SMOKE_USERNAME="$PROD_SMOKE_USERNAME" \
+      PROD_SMOKE_PASSWORD="$PROD_SMOKE_PASSWORD" \
+      npm run test:e2e:prod-auth-upload
+  )
+}
+
+cmd_prod_logs() {
+  require_cmd docker
+  local service="${1:-fans-backend}"
+  docker logs --tail=200 "$service"
+}
+
+main() {
+  local command="${1:-}"
+  shift || true
+
+  case "$command" in
+    local-check)
+      cmd_local_check "$@"
+      ;;
+    prod-http)
+      cmd_prod_http "$@"
+      ;;
+    prod-ops)
+      cmd_prod_ops "$@"
+      ;;
+    prod-auth-upload)
+      cmd_prod_auth_upload "$@"
+      ;;
+    prod-logs)
+      cmd_prod_logs "$@"
+      ;;
+    ""|-h|--help|help)
+      usage
+      ;;
+    *)
+      echo "Unknown command: $command" >&2
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

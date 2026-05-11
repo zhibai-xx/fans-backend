@@ -57,7 +57,7 @@
 - `OSS_BUCKET`
 - `OSS_ENDPOINT`
 - `OSS_REGION`
-- `OSS_CDN_BASE_URL`
+- `OSS_CDN_BASE_URL`（未接 CDN 时可以留空）
 
 建议值：
 
@@ -75,6 +75,11 @@
 - `BODY_PARSER_DEBUG=false`
 - `ENABLE_SWAGGER=false`
 - `USE_OSS_STORAGE=true`
+- 北京 Bucket 示例：
+  - `OSS_BUCKET=enjoycorner-prod`
+  - `OSS_REGION=oss-cn-beijing`
+  - `OSS_ENDPOINT=oss-cn-beijing.aliyuncs.com`
+  - `OSS_CDN_BASE_URL=`
 
 如果你上线初期仍临时使用本地存储：
 

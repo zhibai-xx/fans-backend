@@ -48,18 +48,14 @@ export class PerformanceMiddleware implements NestMiddleware {
     if (res.headersSent) return;
 
     try {
-      // 为不同类型的API设置基本缓存控制
+      // API 数据默认不缓存，避免后台列表、用户状态、媒体元数据出现旧快照。
+      // 静态文件仍可单独设置长缓存。
       if (req.path.includes('/api/upload/file/')) {
         res.setHeader('Cache-Control', 'public, max-age=3600');
-      } else if (req.path.includes('/api/media/review/')) {
-        // 审核相关API不缓存，确保实时性
+      } else if (req.path.includes('/api/')) {
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.setHeader('Pragma', 'no-cache');
         res.setHeader('Expires', '0');
-      } else if (req.path.includes('/api/media/')) {
-        res.setHeader('Cache-Control', 'public, max-age=300');
-      } else if (req.method === 'GET' && req.path.includes('/api/')) {
-        res.setHeader('Cache-Control', 'public, max-age=60');
       }
     } catch (error) {
       // 静默处理缓存头部设置错误，不影响正常响应

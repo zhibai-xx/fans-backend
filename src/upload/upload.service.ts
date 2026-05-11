@@ -283,6 +283,14 @@ export class UploadService {
 
   private async verifyInstantUploadFile(fileUrl: string): Promise<void> {
     try {
+      if (
+        fileUrl.startsWith('http://') ||
+        fileUrl.startsWith('https://') ||
+        fileUrl.startsWith('/api/upload/file/')
+      ) {
+        return;
+      }
+
       const fileExists = await fs.pathExists(fileUrl);
       if (!fileExists) {
         this.logger.warn(`秒传文件不存在: ${fileUrl}`);
@@ -292,6 +300,59 @@ export class UploadService {
         `检查秒传文件存在性失败: ${this.getErrorMessage(error)}`,
       );
     }
+  }
+
+  private shouldUseOssStorage(): boolean {
+    return this.configService.get<boolean>('USE_OSS_STORAGE', false) === true;
+  }
+
+  private getMimeTypeFromFilename(
+    filename: string,
+    fileType: FileType,
+  ): string {
+    const ext = path.extname(filename).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.mp4': 'video/mp4',
+      '.mov': 'video/quicktime',
+      '.webm': 'video/webm',
+    };
+
+    return (
+      mimeTypes[ext] ??
+      (fileType === FileType.IMAGE ? 'image/jpeg' : 'video/mp4')
+    );
+  }
+
+  private async storeMergedFile(params: {
+    finalPath: string;
+    uploadFilename: string;
+    fileType: FileType;
+    fileSize: number;
+  }): Promise<string> {
+    if (!this.shouldUseOssStorage()) {
+      return params.finalPath;
+    }
+
+    const storage = this.storageFactory.getStorage();
+    const buffer = await fs.readFile(params.finalPath);
+    const fileForStorage = {
+      originalname: params.uploadFilename,
+      mimetype: this.getMimeTypeFromFilename(
+        params.uploadFilename,
+        params.fileType,
+      ),
+      buffer,
+      size: params.fileSize,
+    } as Express.Multer.File;
+
+    const storedUrl = await storage.uploadFile(fileForStorage, params.fileType);
+    await fs.remove(params.finalPath);
+    return storedUrl;
   }
 
   /**
@@ -675,6 +736,8 @@ export class UploadService {
       data: { status: UploadStatus.MERGING },
     });
 
+    let storedFileUrl: string | null = null;
+
     try {
       // 生成最终文件路径
       const ext = path.extname(upload.filename);
@@ -709,15 +772,6 @@ export class UploadService {
       const lowerExt = ext.toLowerCase();
       const resolvedFileType = this.resolveStoredFileType(upload.file_type);
 
-      if (resolvedFileType === FileType.VIDEO && lowerExt === '.mov') {
-        sourceMetadataValue.original_file_url = finalPath;
-        sourceMetadataValue.original_file_format = 'mov';
-      }
-      const resolvedSourceMetadata =
-        Object.keys(sourceMetadataValue).length > 0
-          ? sourceMetadataValue
-          : undefined;
-
       // 处理标签：将标签名称转换为标签ID
       let tagIds: string[] = [];
       const rawTagNames = metadata.tagNames ?? [];
@@ -746,11 +800,27 @@ export class UploadService {
         }
       }
 
+      storedFileUrl = await this.storeMergedFile({
+        finalPath,
+        uploadFilename: upload.filename,
+        fileType: resolvedFileType,
+        fileSize: Number(upload.file_size),
+      });
+
+      if (resolvedFileType === FileType.VIDEO && lowerExt === '.mov') {
+        sourceMetadataValue.original_file_url = storedFileUrl;
+        sourceMetadataValue.original_file_format = 'mov';
+      }
+      const resolvedSourceMetadata =
+        Object.keys(sourceMetadataValue).length > 0
+          ? sourceMetadataValue
+          : undefined;
+
       const mediaTitle = metadata.title ?? upload.filename;
       const media = await this.mediaService.create({
         title: mediaTitle,
         description: metadata.description,
-        url: finalPath,
+        url: storedFileUrl,
         size: Number(upload.file_size),
         width,
         height,
@@ -774,7 +844,7 @@ export class UploadService {
         where: { id: upload.id },
         data: {
           status: UploadStatus.COMPLETED,
-          final_path: finalPath,
+          final_path: storedFileUrl,
           media_id: media.id,
         },
       });
@@ -788,6 +858,16 @@ export class UploadService {
       this.logger.log(`文件合并成功: ${media.id}`);
       return { mediaId: media.id };
     } catch (error) {
+      if (storedFileUrl && this.shouldUseOssStorage()) {
+        try {
+          await this.storageFactory.getStorage().deleteFile(storedFileUrl);
+        } catch (cleanupError) {
+          this.logger.warn(
+            `清理失败上传文件失败: ${this.getErrorMessage(cleanupError)}`,
+          );
+        }
+      }
+
       // 失败时更新状态
       await this.prisma.upload.update({
         where: { id: upload.id },

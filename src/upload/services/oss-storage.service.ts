@@ -93,8 +93,11 @@ export class OssStorageService implements IStorageService {
       // 上传到OSS
       const result = await client.put(ossPath, file.buffer);
 
-      // 返回可访问的URL
-      return result.url || `${cdnBaseUrl}/${ossPath}`;
+      void cdnBaseUrl;
+      void result;
+
+      // Bucket 保持私有，前端统一访问应用内路径，由后端签名跳转到 OSS。
+      return `/api/upload/file/${ossPath}`;
     } catch (error) {
       const message = getErrorMessage(error);
       this.logger.error(`上传文件到OSS失败: ${message}`, getErrorStack(error));
@@ -175,8 +178,10 @@ export class OssStorageService implements IStorageService {
       // 上传缩略图到OSS
       const result = await client.put(ossPath, thumbnailBuffer);
 
-      // 返回缩略图URL
-      return result.url || `${cdnBaseUrl}/${ossPath}`;
+      void cdnBaseUrl;
+      void result;
+
+      return `/api/upload/file/${ossPath}`;
     } catch (error) {
       this.logger.error(
         `生成缩略图失败: ${getErrorMessage(error)}`,
@@ -193,6 +198,14 @@ export class OssStorageService implements IStorageService {
    */
   private getOssPathFromUrl(url: string): string {
     try {
+      if (url.startsWith('/api/upload/file/')) {
+        return url.substring('/api/upload/file/'.length);
+      }
+
+      if (url.startsWith('api/upload/file/')) {
+        return url.substring('api/upload/file/'.length);
+      }
+
       // 移除CDN基础URL
       if (url.startsWith(this.cdnBaseUrl)) {
         return url.substring(this.cdnBaseUrl.length + 1); // +1 是为了移除开头的斜杠
@@ -200,6 +213,10 @@ export class OssStorageService implements IStorageService {
 
       // 尝试解析URL
       const urlObj = new URL(url);
+      if (urlObj.pathname.includes('/api/upload/file/')) {
+        return urlObj.pathname.replace(/^.*\/api\/upload\/file\//, '');
+      }
+
       const pathParts = urlObj.pathname.split('/');
       // 移除第一个空元素（因为pathname以/开头）
       if (pathParts[0] === '') {
@@ -219,6 +236,16 @@ export class OssStorageService implements IStorageService {
       );
       return ''; // 返回空字符串代替null
     }
+  }
+
+  getSignedUrl(fileUrl: string, expires = 300): string {
+    const { client } = this.getClient();
+    const ossPath = this.getOssPathFromUrl(fileUrl);
+    if (!ossPath) {
+      throw new Error('无效的 OSS 文件路径');
+    }
+
+    return client.signatureUrl(ossPath, { expires, method: 'GET' });
   }
 
   private getClient(): {

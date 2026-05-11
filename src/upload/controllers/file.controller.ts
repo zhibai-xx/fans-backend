@@ -13,16 +13,23 @@ import { join } from 'path';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ConfigService } from '@nestjs/config';
+import { OssStorageService } from '../services/oss-storage.service';
 
 @Controller('upload/file')
 export class FileController {
   private readonly uploadDir: string;
+  private readonly useOssStorage: boolean;
   private readonly logger = new Logger(FileController.name);
   private readonly disallowedDirectories = new Set(['temp', 'chunks']);
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly ossStorageService: OssStorageService,
+  ) {
     this.uploadDir =
       this.configService.get<string>('UPLOAD_DIR') || './uploads';
+    this.useOssStorage =
+      this.configService.get<boolean>('USE_OSS_STORAGE', false) === true;
   }
 
   private getErrorMessage(error: unknown): string {
@@ -72,6 +79,14 @@ export class FileController {
 
       // 检查文件是否存在
       if (!fs.existsSync(filePath)) {
+        if (this.useOssStorage) {
+          const signedUrl = this.ossStorageService.getSignedUrl(
+            `/api/upload/file/${sanitizedPath}`,
+          );
+          res.redirect(302, signedUrl);
+          return;
+        }
+
         throw new NotFoundException('文件不存在');
       }
 

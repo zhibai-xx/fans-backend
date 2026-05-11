@@ -43,18 +43,11 @@ export class AdminTagCategoryController {
    */
   @Get('tags')
   async getAllTags(@Query('search') search?: string) {
-    try {
-      const tags = await this.mediaService.getAllTagsWithStats(search);
-      return {
-        success: true,
-        data: tags,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: this.getErrorMessage(error, '获取标签失败'),
-      };
-    }
+    const tags = await this.mediaService.getAllTagsWithStats(search);
+    return {
+      success: true,
+      data: tags,
+    };
   }
 
   /**
@@ -66,23 +59,16 @@ export class AdminTagCategoryController {
     @Body() createTagDto: CreateTagDto,
     @Req() req: RequestWithUser,
   ) {
-    try {
-      const tag = await this.mediaService.createTag(createTagDto, {
-        source: TagSource.ADMIN,
-        creatorId: req.user.id,
-        creatorType: TagCreatorType.ADMIN,
-      });
-      return {
-        success: true,
-        data: tag,
-        message: '标签创建成功',
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: this.getErrorMessage(error, '创建标签失败'),
-      };
-    }
+    const tag = await this.mediaService.createTag(createTagDto, {
+      source: TagSource.ADMIN,
+      creatorId: req.user.id,
+      creatorType: TagCreatorType.ADMIN,
+    });
+    return {
+      success: true,
+      data: tag,
+      message: '标签创建成功',
+    };
   }
 
   /**
@@ -90,24 +76,18 @@ export class AdminTagCategoryController {
    */
   @Put('tags/:id')
   async updateTag(@Param('id') id: string, @Body() updateTagDto: UpdateTagDto) {
-    try {
-      if (!updateTagDto.name) {
-        throw new BadRequestException('标签名称不能为空');
-      }
-      const tag = await this.mediaService.updateTag(id, {
-        name: updateTagDto.name,
-      });
-      return {
-        success: true,
-        data: tag,
-        message: '标签更新成功',
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: this.getErrorMessage(error, '更新标签失败'),
-      };
+    if (!updateTagDto.name) {
+      throw new BadRequestException('标签名称不能为空');
     }
+
+    const tag = await this.mediaService.updateTag(id, {
+      name: updateTagDto.name,
+    });
+    return {
+      success: true,
+      data: tag,
+      message: '标签更新成功',
+    };
   }
 
   /**
@@ -116,21 +96,15 @@ export class AdminTagCategoryController {
   @Delete('tags/batch')
   @HttpCode(HttpStatus.OK)
   async batchDeleteTags(@Body('ids') ids: string[]) {
-    try {
-      if (!Array.isArray(ids) || ids.length === 0) {
-        throw new BadRequestException('请选择要删除的标签');
-      }
-      await this.mediaService.batchDeleteTags(ids);
-      return {
-        success: true,
-        message: `成功下线 ${ids.length} 个标签`,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: this.getErrorMessage(error, '批量删除标签失败'),
-      };
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new BadRequestException('请选择要删除的标签');
     }
+
+    await this.mediaService.batchDeleteTags(ids);
+    return {
+      success: true,
+      message: `成功下线 ${ids.length} 个标签`,
+    };
   }
 
   /**
@@ -139,18 +113,7 @@ export class AdminTagCategoryController {
   @Delete('tags/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteTag(@Param('id') id: string) {
-    try {
-      await this.mediaService.deleteTag(id);
-      return {
-        success: true,
-        message: '标签已下线',
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: this.getErrorMessage(error, '删除标签失败'),
-      };
-    }
+    await this.mediaService.deleteTag(id);
   }
 
   /**
@@ -162,19 +125,12 @@ export class AdminTagCategoryController {
     @Param('id') id: string,
     @Body() dto: UpdateTagStatusDto,
   ) {
-    try {
-      const tag = await this.mediaService.updateTagStatus(id, dto.status);
-      return {
-        success: true,
-        data: tag,
-        message: dto.status === 'ACTIVE' ? '标签已上线' : '标签已下线',
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: this.getErrorMessage(error, '更新标签状态失败'),
-      };
-    }
+    const tag = await this.mediaService.updateTagStatus(id, dto.status);
+    return {
+      success: true,
+      data: tag,
+      message: dto.status === 'ACTIVE' ? '标签已上线' : '标签已下线',
+    };
   }
 
   // =====================================
@@ -186,19 +142,12 @@ export class AdminTagCategoryController {
    */
   @Get('categories')
   async getAllCategories(@Query('search') search?: string) {
-    try {
-      const categories =
-        await this.mediaService.getAllCategoriesWithStats(search);
-      return {
-        success: true,
-        data: categories,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: this.getErrorMessage(error, '获取分类失败'),
-      };
-    }
+    const categories =
+      await this.mediaService.getAllCategoriesWithStats(search);
+    return {
+      success: true,
+      data: categories,
+    };
   }
 
   /**
@@ -207,20 +156,12 @@ export class AdminTagCategoryController {
   @Post('categories')
   @HttpCode(HttpStatus.CREATED)
   async createCategory(@Body() createCategoryDto: CreateCategoryDto) {
-    try {
-      const category =
-        await this.mediaService.createCategory(createCategoryDto);
-      return {
-        success: true,
-        data: category,
-        message: '分类创建成功',
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: this.getErrorMessage(error, '创建分类失败'),
-      };
-    }
+    const category = await this.mediaService.createCategory(createCategoryDto);
+    return {
+      success: true,
+      data: category,
+      message: '分类创建成功',
+    };
   }
 
   /**
@@ -231,22 +172,15 @@ export class AdminTagCategoryController {
     @Param('id') id: string,
     @Body() updateCategoryDto: UpdateCategoryDto,
   ) {
-    try {
-      const category = await this.mediaService.updateCategory(
-        id,
-        updateCategoryDto,
-      );
-      return {
-        success: true,
-        data: category,
-        message: '分类更新成功',
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: this.getErrorMessage(error, '更新分类失败'),
-      };
-    }
+    const category = await this.mediaService.updateCategory(
+      id,
+      updateCategoryDto,
+    );
+    return {
+      success: true,
+      data: category,
+      message: '分类更新成功',
+    };
   }
 
   /**
@@ -255,21 +189,15 @@ export class AdminTagCategoryController {
   @Delete('categories/batch')
   @HttpCode(HttpStatus.OK)
   async batchDeleteCategories(@Body('ids') ids: string[]) {
-    try {
-      if (!Array.isArray(ids) || ids.length === 0) {
-        throw new BadRequestException('请选择要删除的分类');
-      }
-      await this.mediaService.batchDeleteCategories(ids);
-      return {
-        success: true,
-        message: `成功删除 ${ids.length} 个分类`,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: this.getErrorMessage(error, '批量删除分类失败'),
-      };
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new BadRequestException('请选择要删除的分类');
     }
+
+    await this.mediaService.batchDeleteCategories(ids);
+    return {
+      success: true,
+      message: `成功删除 ${ids.length} 个分类`,
+    };
   }
 
   /**
@@ -278,18 +206,7 @@ export class AdminTagCategoryController {
   @Delete('categories/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteCategory(@Param('id') id: string) {
-    try {
-      await this.mediaService.deleteCategory(id);
-      return {
-        success: true,
-        message: '分类删除成功',
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: this.getErrorMessage(error, '删除分类失败'),
-      };
-    }
+    await this.mediaService.deleteCategory(id);
   }
 
   // =====================================
@@ -301,24 +218,10 @@ export class AdminTagCategoryController {
    */
   @Get('tags-categories/stats')
   async getTagsCategoriesStats() {
-    try {
-      const stats = await this.mediaService.getTagsCategoriesStats();
-      return {
-        success: true,
-        data: stats,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: this.getErrorMessage(error, '获取统计信息失败'),
-      };
-    }
-  }
-
-  private getErrorMessage(error: unknown, fallback: string): string {
-    if (error instanceof Error && error.message) {
-      return error.message;
-    }
-    return fallback;
+    const stats = await this.mediaService.getTagsCategoriesStats();
+    return {
+      success: true,
+      data: stats,
+    };
   }
 }

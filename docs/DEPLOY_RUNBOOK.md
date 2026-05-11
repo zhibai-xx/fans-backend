@@ -71,6 +71,9 @@ cp .env.prod.example .env.prod
 - `OSS_ACCESS_KEY_ID`
 - `OSS_ACCESS_KEY_SECRET`
 - `OSS_BUCKET`
+- `OSS_REGION=oss-cn-beijing`
+- `OSS_ENDPOINT=oss-cn-beijing.aliyuncs.com`
+- `OSS_CDN_BASE_URL=`（未接 CDN 时留空）
 - `TRUST_PROXY=true`
 - `BODY_PARSER_DEBUG=false`
 - `ENABLE_SWAGGER=false`
