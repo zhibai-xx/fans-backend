@@ -238,14 +238,22 @@ export class OssStorageService implements IStorageService {
     }
   }
 
-  getSignedUrl(fileUrl: string, expires = 300): string {
+  getSignedUrl(
+    fileUrl: string,
+    expires = 300,
+    response?: {
+      'content-disposition'?: string;
+      'content-type'?: string;
+      'cache-control'?: string;
+    },
+  ): string {
     const { client } = this.getClient();
     const ossPath = this.getOssPathFromUrl(fileUrl);
     if (!ossPath) {
       throw new Error('无效的 OSS 文件路径');
     }
 
-    return client.signatureUrl(ossPath, { expires, method: 'GET' });
+    return client.signatureUrl(ossPath, { expires, method: 'GET', response });
   }
 
   private getClient(): {

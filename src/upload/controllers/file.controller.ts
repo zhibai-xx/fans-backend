@@ -7,6 +7,7 @@ import {
   NotFoundException,
   Header,
   Logger,
+  Query,
 } from '@nestjs/common';
 import { Response, Request } from 'express';
 import { join } from 'path';
@@ -50,11 +51,12 @@ export class FileController {
    * @param filename 文件名
    * @param res Express响应对象
    */
-  @Get(':type/:filename')
+  @Get([':type/:filename', 'uploads/:type/:filename'])
   @Header('Cache-Control', 'max-age=2592000') // 30天缓存
   serveFile(
     @Param('type') type: string,
     @Param('filename') filename: string,
+    @Query('download') downloadName: string | undefined,
     @Req() req: Request,
     @Res() res: Response, // 移除 passthrough，直接控制响应
   ): void {
@@ -80,8 +82,15 @@ export class FileController {
       // 检查文件是否存在
       if (!fs.existsSync(filePath)) {
         if (this.useOssStorage) {
+          const contentDisposition = downloadName
+            ? this.buildContentDisposition(downloadName)
+            : undefined;
           const signedUrl = this.ossStorageService.getSignedUrl(
             `/api/upload/file/${sanitizedPath}`,
+            300,
+            contentDisposition
+              ? { 'content-disposition': contentDisposition }
+              : undefined,
           );
           res.redirect(302, signedUrl);
           return;
@@ -122,7 +131,9 @@ export class FileController {
         res.set({
           'Content-Type': contentType,
           'Content-Length': stat.size.toString(),
-          'Content-Disposition': `inline; filename="${path.basename(filePath)}"`,
+          'Content-Disposition': downloadName
+            ? this.buildContentDisposition(downloadName)
+            : `inline; filename="${path.basename(filePath)}"`,
           'Cache-Control': 'max-age=2592000', // 30天缓存
           'Accept-Ranges': 'bytes', // 告知客户端支持Range请求
         });
@@ -172,6 +183,15 @@ export class FileController {
     };
 
     return mimeTypes[extension] ?? 'application/octet-stream';
+  }
+
+  private buildContentDisposition(filename: string): string {
+    const fallback =
+      filename
+        .replace(/[^\x20-\x7E]/g, '_')
+        .replace(/["\\]/g, '_')
+        .trim() || 'download';
+    return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
   }
 
   /**

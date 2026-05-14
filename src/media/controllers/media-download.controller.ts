@@ -108,7 +108,11 @@ export class MediaDownloadController {
 
     const media = await this.mediaService.findOne(mediaId);
     const downloadPath = convertToAccessibleUrl(media.url);
-    res.redirect(downloadPath);
+    const filename = this.buildFileName(
+      media.title,
+      this.extractFileType(media.url),
+    );
+    res.redirect(this.appendDownloadName(downloadPath, filename));
   }
 
   private extractFileType(url: string | null): string | null {
@@ -127,6 +131,15 @@ export class MediaDownloadController {
       return `${safeTitle}.${fileType}`;
     }
     return safeTitle;
+  }
+
+  private appendDownloadName(downloadPath: string, filename: string): string {
+    if (!downloadPath) {
+      return downloadPath;
+    }
+
+    const separator = downloadPath.includes('?') ? '&' : '?';
+    return `${downloadPath}${separator}download=${encodeURIComponent(filename)}`;
   }
 
   private resolveGuestKey(req: Request): string {
