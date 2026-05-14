@@ -15,5 +15,6 @@ export default () => ({
     region: process.env.OSS_REGION,
     endpoint: process.env.OSS_ENDPOINT,
     cdnBaseUrl: process.env.OSS_CDN_BASE_URL,
+    objectPrefix: process.env.OSS_OBJECT_PREFIX,
   },
 });

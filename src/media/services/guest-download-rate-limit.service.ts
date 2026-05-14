@@ -27,8 +27,13 @@ export class GuestDownloadRateLimitService
   private readonly logger = new Logger(GuestDownloadRateLimitService.name);
   private client: RedisClientType | null = null;
   private readonly operationTimeoutMs = 1500;
+  private readonly keyPrefix: string;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService) {
+    this.keyPrefix = this.normalizeKeyPrefix(
+      this.configService.get<string>('REDIS_KEY_PREFIX'),
+    );
+  }
 
   async onModuleInit() {
     const host = this.configService.get<string>('REDIS_HOST', 'localhost');
@@ -78,7 +83,9 @@ export class GuestDownloadRateLimitService
     try {
       const now = Date.now();
       const countKey = this.buildCountKey(guestKey, now, config.windowMs);
-      const lastRequestKey = `download:guest:last:${guestKey}`;
+      const lastRequestKey = this.prefixedKey(
+        `download:guest:last:${guestKey}`,
+      );
 
       const lastRequestAtRaw = await this.withTimeout(
         redisClient.get(lastRequestKey),
@@ -142,7 +149,7 @@ export class GuestDownloadRateLimitService
     windowMs: number,
   ): string {
     const bucketStart = Math.floor(currentMs / windowMs) * windowMs;
-    return `download:guest:count:${guestKey}:${bucketStart}`;
+    return this.prefixedKey(`download:guest:count:${guestKey}:${bucketStart}`);
   }
 
   async ping(): Promise<{
@@ -179,5 +186,16 @@ export class GuestDownloadRateLimitService
         }, this.operationTimeoutMs);
       }),
     ]);
+  }
+
+  private prefixedKey(key: string): string {
+    return `${this.keyPrefix}${key}`;
+  }
+
+  private normalizeKeyPrefix(prefix?: string): string {
+    if (!prefix) {
+      return '';
+    }
+    return prefix.endsWith(':') ? prefix : `${prefix}:`;
   }
 }

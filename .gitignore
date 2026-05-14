@@ -57,6 +57,7 @@ Thumbs.db
 .env.test.local
 .env.production
 .env.production.local
+.env.staging
 .env.local
 
 # temp directory

@@ -50,6 +50,23 @@ class EnvironmentVariables {
   @IsString()
   @IsOptional()
   OSS_ENDPOINT: string;
+
+  @IsString()
+  @IsOptional()
+  OSS_OBJECT_PREFIX: string;
+
+  @IsString()
+  @IsOptional()
+  BULLMQ_PREFIX: string;
+
+  @IsString()
+  @IsOptional()
+  REDIS_KEY_PREFIX: string;
+
+  @IsBoolean()
+  @Transform(({ value }: { value: unknown }) => value === 'true')
+  @IsOptional()
+  ENABLE_MEDIA_CLEANUP_SCHEDULER: boolean;
 }
 
 export function validate(config: Record<string, unknown>) {

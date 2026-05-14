@@ -12,7 +12,8 @@ RUN npm run build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
-RUN apk add --no-cache ffmpeg
+ARG INSTALL_FFMPEG=false
+RUN if [ "$INSTALL_FFMPEG" = "true" ]; then apk add --no-cache ffmpeg; fi
 ENV NODE_ENV=production
 ENV PORT=3000
 COPY --from=builder /app/package.json ./package.json

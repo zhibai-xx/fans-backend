@@ -13,6 +13,7 @@ type OssConfig = {
   bucket: string;
   endpoint: string;
   cdnBaseUrl?: string;
+  objectPrefix?: string;
 };
 
 const getErrorMessage = (error: unknown): string => {
@@ -49,6 +50,7 @@ export class OssStorageService implements IStorageService {
   private client: OSS | null = null;
   private bucket = '';
   private cdnBaseUrl = '';
+  private objectPrefix = '';
   private readonly logger = new Logger(OssStorageService.name);
 
   constructor(private configService: ConfigService) {
@@ -88,7 +90,7 @@ export class OssStorageService implements IStorageService {
       // 生成唯一文件名
       const fileExt = path.extname(file.originalname);
       const fileName = `${uuidv4()}${fileExt}`;
-      const ossPath = `${directory}${fileName}`;
+      const ossPath = this.withObjectPrefix(`${directory}${fileName}`);
 
       // 上传到OSS
       const result = await client.put(ossPath, file.buffer);
@@ -126,7 +128,9 @@ export class OssStorageService implements IStorageService {
       try {
         const fileExt = path.extname(ossPath);
         const fileName = path.basename(ossPath, fileExt);
-        const thumbnailPath = `thumbnails/thumb_${fileName}${fileExt}`;
+        const thumbnailPath = this.withObjectPrefix(
+          `thumbnails/thumb_${fileName}${fileExt}`,
+        );
         await client.delete(thumbnailPath);
       } catch (error) {
         // 缩略图可能不存在，忽略错误
@@ -173,7 +177,7 @@ export class OssStorageService implements IStorageService {
       // 生成唯一文件名
       const fileExt = path.extname(file.originalname);
       const fileName = `thumb_${uuidv4()}${fileExt}`;
-      const ossPath = `thumbnails/${fileName}`;
+      const ossPath = this.withObjectPrefix(`thumbnails/${fileName}`);
 
       // 上传缩略图到OSS
       const result = await client.put(ossPath, thumbnailBuffer);
@@ -278,6 +282,7 @@ export class OssStorageService implements IStorageService {
       endpoint: ossConfig.endpoint,
     });
     this.bucket = ossConfig.bucket;
+    this.objectPrefix = this.normalizeObjectPrefix(ossConfig.objectPrefix);
     this.cdnBaseUrl =
       ossConfig.cdnBaseUrl ||
       `https://${ossConfig.bucket}.${ossConfig.endpoint}`;
@@ -287,5 +292,19 @@ export class OssStorageService implements IStorageService {
       bucket: this.bucket,
       cdnBaseUrl: this.cdnBaseUrl,
     };
+  }
+
+  private withObjectPrefix(ossPath: string): string {
+    if (!this.objectPrefix) {
+      return ossPath;
+    }
+    return `${this.objectPrefix}/${ossPath.replace(/^\/+/, '')}`;
+  }
+
+  private normalizeObjectPrefix(prefix?: string): string {
+    if (!prefix) {
+      return '';
+    }
+    return prefix.replace(/^\/+|\/+$/g, '').trim();
   }
 }

@@ -20,6 +20,14 @@ export class MediaCleanupScheduler implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    const enabled = this.configService.get<string>(
+      'ENABLE_MEDIA_CLEANUP_SCHEDULER',
+    );
+    if (enabled === 'false') {
+      this.logger.warn('回收站定时清理任务已关闭');
+      return;
+    }
+
     await this.registerRecurringCleanupJob();
   }
 

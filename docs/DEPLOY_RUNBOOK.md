@@ -16,8 +16,8 @@
 
 - 当前首发阶段：`ENABLE_VIDEO_FEATURE=false`
 - 后端镜像不再依赖 `ffmpeg-static` / `ffprobe-static` 在 `npm ci` 阶段下载二进制
-- 生产环境默认使用系统 `ffmpeg` / `ffprobe`
-- Docker 运行镜像已内置 `ffmpeg`
+- Docker 运行镜像默认不安装 `ffmpeg`，避免当前图片阶段产生额外镜像体积
+- 如果未来恢复视频模块，构建后端镜像时设置 `INSTALL_FFMPEG=true`
 - 如果未来恢复视频模块，建议显式配置：
   - `FFMPEG_PATH=/usr/bin/ffmpeg`
   - `FFPROBE_PATH=/usr/bin/ffprobe`
@@ -199,3 +199,112 @@ curl -I https://www.enjoycorner.com
 - 打开数据库自动备份
 - 检查 Redis 持久化
 - 观察带宽、磁盘、容器日志与慢请求
+
+## 低配 Staging
+
+适用目标：
+
+- 验证 `staging.enjoycorner.com` 下的真实域名、HTTPS、Nginx 转发、登录 Cookie、接口路径、OSS 上传下载。
+- 不额外运行独立 Redis，不单独拆 worker 服务器。
+- 不污染线上数据库和线上 OSS 对象目录。
+
+资源隔离方式：
+
+- 数据库：必须使用独立库，例如 `idol_db_staging`
+- Redis：复用线上 Redis 容器 `fans-redis`，但 staging 使用 `REDIS_DB=1`
+- Redis key：staging 使用 `REDIS_KEY_PREFIX=staging:`
+- BullMQ：staging 使用 `BULLMQ_PREFIX=staging`
+- OSS：复用 bucket，但 staging 使用 `OSS_OBJECT_PREFIX=staging`
+- 后台任务：staging 默认 `ENABLE_MEDIA_CLEANUP_SCHEDULER=false`
+
+### 1. DNS
+
+在阿里云 DNS 增加：
+
+```text
+staging.enjoycorner.com A 47.93.203.67
+```
+
+### 2. HTTPS 证书
+
+`staging.enjoycorner.com` 必须加入证书。推荐扩展现有证书：
+
+```bash
+cd /home/admin/apps/zjy-fans/fans-backend
+docker compose -f deploy/compose/docker-compose.prod.rds.yml stop nginx
+
+sudo certbot certonly --standalone \
+  --cert-name enjoycorner.com \
+  -d enjoycorner.com \
+  -d www.enjoycorner.com \
+  -d staging.enjoycorner.com
+
+docker compose -f deploy/compose/docker-compose.prod.rds.yml up -d nginx
+```
+
+### 3. 创建 staging 环境文件
+
+后端：
+
+```bash
+cd /home/admin/apps/zjy-fans/fans-backend
+cp .env.staging.example .env.staging
+```
+
+前端：
+
+```bash
+cd /home/admin/apps/zjy-fans/fans-next
+cp .env.staging.example .env.staging
+```
+
+填写真实值时注意：
+
+- staging 的 `DATABASE_URL` 指向 `idol_db_staging`
+- staging 和 production 的 `JWT_SECRET` / `NEXTAUTH_SECRET` 可以不同
+- staging 的 `OSS_OBJECT_PREFIX=staging`
+- staging 的 `REDIS_DB=1`
+
+### 4. 启动 staging
+
+生产服务必须先运行，因为 staging 会加入 `fans-prod_default` 网络并复用 `fans-redis`。
+
+```bash
+cd /home/admin/apps/zjy-fans/fans-backend
+docker compose -f deploy/compose/docker-compose.staging.yml up -d --build
+```
+
+执行 staging 数据库迁移：
+
+```bash
+docker exec -it fans-staging-backend npx prisma migrate deploy
+```
+
+重新加载线上 nginx，使 `staging.enjoycorner.com` 生效：
+
+```bash
+docker exec fans-nginx nginx -s reload
+```
+
+### 5. 验证
+
+```bash
+curl -I https://staging.enjoycorner.com
+curl https://staging.enjoycorner.com/api/health
+```
+
+预期：
+
+- 首页返回 `200`
+- `/api/health` 返回数据库和 Redis 都健康
+
+### 6. 本地前端直连 staging API
+
+前端本地开发时可以运行：
+
+```bash
+cd /Users/houjiawei/Desktop/Projects/zjy-fans/fans-next
+npm run dev:staging-api
+```
+
+这会让本地 Next.js 仍运行在 `http://localhost:3001`，但 `/api/*` 通过 rewrite 转发到 `https://staging.enjoycorner.com`。

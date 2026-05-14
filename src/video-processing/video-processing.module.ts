@@ -34,6 +34,7 @@ import { MyLoggerModule } from '../my-logger/my-logger.module';
           password: configService.get('REDIS_PASSWORD'),
           db: configService.get('REDIS_DB', 0),
         },
+        prefix: configService.get('BULLMQ_PREFIX', 'bull'),
       }),
       inject: [ConfigService],
     }),
