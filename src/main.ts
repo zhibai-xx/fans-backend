@@ -11,7 +11,10 @@ import {
   migrateLegacyProcessedDirectory,
   PROCESSED_ROOT,
 } from './common/utils/storage-path.util';
-import { getAllowedCorsOrigins } from './config/security.config';
+import {
+  getAllowedCorsOrigins,
+  isCorsOriginAllowed,
+} from './config/security.config';
 
 async function bootstrap() {
   // 设置时区为中国标准时间 (UTC+8)
@@ -111,7 +114,7 @@ async function bootstrap() {
       origin: string | undefined,
       callback: (error: Error | null, allow?: boolean) => void,
     ) => {
-      if (!origin || allowedCorsOrigins.includes(origin)) {
+      if (isCorsOriginAllowed(origin, allowedCorsOrigins)) {
         callback(null, true);
         return;
       }

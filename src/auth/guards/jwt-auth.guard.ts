@@ -84,12 +84,12 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     void _status;
     const errMessage = getErrorMessage(err);
     const infoMessage = info?.message ?? '无';
-    const userLabel = getUserLabel(user);
-    this.logger.debug(
-      `JWT验证结果 - 错误: ${errMessage}, 用户: ${userLabel}, 信息: ${infoMessage}`,
-    );
 
     if (err || !user) {
+      const userLabel = getUserLabel(user);
+      this.logger.debug(
+        `JWT验证失败详情 - 错误: ${errMessage}, 用户: ${userLabel}, 信息: ${infoMessage}`,
+      );
       this.logger.warn(
         `JWT认证失败: ${errMessage !== '未知错误' ? errMessage : infoMessage}`,
       );

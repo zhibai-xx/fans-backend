@@ -10,6 +10,46 @@ const parseOriginList = (rawValue: string): string[] => {
     .filter((origin) => origin.length > 0);
 };
 
+const DEV_FRONTEND_PORT = '3001';
+
+const isPrivateIpv4 = (hostname: string): boolean => {
+  const parts = hostname.split('.').map((part) => Number.parseInt(part, 10));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) {
+    return false;
+  }
+
+  const [first, second] = parts;
+  if (first === 10) {
+    return true;
+  }
+  if (first === 172 && second >= 16 && second <= 31) {
+    return true;
+  }
+  return first === 192 && second === 168;
+};
+
+const isDevelopmentFrontendOrigin = (origin: string): boolean => {
+  if (process.env.NODE_ENV === 'production') {
+    return false;
+  }
+
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== 'http:' || url.port !== DEV_FRONTEND_PORT) {
+      return false;
+    }
+
+    return (
+      url.hostname === 'localhost' ||
+      url.hostname === '127.0.0.1' ||
+      url.hostname === '::1' ||
+      isPrivateIpv4(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+};
+
 export const getJwtSecretOrThrow = (): string => {
   const jwtSecret = process.env.JWT_SECRET?.trim();
   if (!jwtSecret) {
@@ -63,4 +103,17 @@ export const getAllowedCorsOrigins = (): string[] => {
   }
 
   return ['http://localhost:3001', 'http://127.0.0.1:3001'];
+};
+
+export const isCorsOriginAllowed = (
+  origin: string | undefined,
+  allowedCorsOrigins: string[],
+): boolean => {
+  if (!origin) {
+    return true;
+  }
+
+  return (
+    allowedCorsOrigins.includes(origin) || isDevelopmentFrontendOrigin(origin)
+  );
 };
