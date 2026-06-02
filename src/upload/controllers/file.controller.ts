@@ -47,29 +47,31 @@ export class FileController {
    * 提供静态文件访问
    * 为了安全起见，防止目录遍历攻击，该方法包含额外的安全检查
    *
-   * @param type 文件类型目录 (image/video等)
-   * @param filename 文件名
+   * @param filePath 文件相对路径，支持 staging/image/file.jpg 等多级 OSS 对象路径
    * @param res Express响应对象
    */
-  @Get([':type/:filename', 'uploads/:type/:filename'])
+  @Get('*filePath')
   @Header('Cache-Control', 'max-age=2592000') // 30天缓存
   serveFile(
-    @Param('type') type: string,
-    @Param('filename') filename: string,
+    @Param('filePath') filePathParam: string | string[],
     @Query('download') downloadName: string | undefined,
     @Req() req: Request,
     @Res() res: Response, // 移除 passthrough，直接控制响应
   ): void {
     try {
-      if (this.disallowedDirectories.has(type)) {
-        throw new NotFoundException('文件不存在或无法访问');
-      }
-
-      // 构建相对路径
-      const relativePath = `${type}/${filename}`;
+      const relativePath = this.normalizeRoutePath(filePathParam);
 
       // 净化文件路径，防止目录遍历攻击
       const sanitizedPath = this.sanitizeFilePath(relativePath);
+
+      if (
+        !sanitizedPath ||
+        sanitizedPath
+          .split('/')
+          .some((segment) => this.disallowedDirectories.has(segment))
+      ) {
+        throw new NotFoundException('文件不存在或无法访问');
+      }
 
       // 构建文件的完整路径
       const filePath = join(this.uploadDir, sanitizedPath);
@@ -202,6 +204,10 @@ export class FileController {
   private sanitizeFilename(filename: string): string {
     // 提取基本文件名并移除任何路径分隔符和特殊字符
     return filename.replace(/[/\\?%*:|"<>]/g, '');
+  }
+
+  private normalizeRoutePath(filePath: string | string[]): string {
+    return Array.isArray(filePath) ? filePath.join('/') : filePath;
   }
 
   /**
